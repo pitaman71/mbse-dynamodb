@@ -90,7 +90,7 @@ def test_the_latest_snapshot_wins(plugin):
 
 def test_a_large_snapshot_in_parts(plugin, aws):
     store = work_tracker()
-    titles = [f"Task {n}: " + "a long description of the work " * 4 for n in range(1500)]
+    titles = [f"Task {n}: " + "a long description of the work " * 400 for n in range(40)]
     plugin.journal(add_tasks(store, titles))
     snapshot = Plain.ToPlain(store).Snapshot()
     size = len(json.dumps(snapshot).encode())
