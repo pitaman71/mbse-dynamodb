@@ -64,3 +64,17 @@ def test_mbse_rest_case_with_this_plugin(name, cases, aws, monkeypatch):
     monkeypatch.setattr(cases, "Persistence", types.SimpleNamespace(**{**members, "Memory": Recording}))
     getattr(cases, name)()
     assert json.dumps(Recording().load())  # the table holds what the case left, as plain data
+
+
+def test_the_demo_service_over_this_plugin(aws, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from mbse.Persistence.DynamoDB import Demo
+
+    monkeypatch.setenv("MBSE_DYNAMODB_TABLE", "demo")
+    first = TestClient(Demo.work_tracker())  # first start: the installs, then a snapshot of them in DynamoDB
+    assert first.get("/schemas").status_code == 200
+    snapshot, journal = Plugin.Plugin("demo", region=REGION).load()
+    assert snapshot is not None and journal == []
+    again = TestClient(Demo.work_tracker())  # a restart reads it back
+    assert again.get("/schemas").json() == first.get("/schemas").json()
