@@ -35,15 +35,23 @@ One table, with on-demand capacity, holds any number of stores.
 
 ## Configuration
 
-`Plugin(table="mbse-store", *, store="store", region=None, endpoint_url=None, client=None, create=True,
-part_bytes=350_000)`: `region` and `endpoint_url` go to boto3 (credentials are boto3's own); `create` makes the table
-if absent and waits until it is active. `Plugin.from_environment()` reads `MBSE_DYNAMODB_TABLE`,
-`MBSE_DYNAMODB_STORE`, `MBSE_DYNAMODB_ENDPOINT_URL` and `MBSE_DYNAMODB_CREATE` (`0` not to make the table), with the
-region from `AWS_REGION`.
+`Plugin()`, with no arguments, takes every setting from the environment, so that a service can make it by name; an
+argument given overrides the environment (tests give them all).
 
-`Demo.work_tracker()` is mbse-rest's `Service.work_tracker` given `Plugin.from_environment()`: an ASGI factory that
-serves the WorkTracker over DynamoDB until mbse-rest's service selects its plugin by configuration of its own (see
-"What mbse-rest's service needs to select it", below).
+| Variable | Argument | Default |
+|---|---|---|
+| `MBSE_DYNAMODB_TABLE` | `table` | `mbse-store` |
+| `MBSE_DYNAMODB_STORE` | `store` (the partition key) | `store` |
+| `MBSE_DYNAMODB_REGION` | `region` | boto3's own: `AWS_REGION`, `AWS_DEFAULT_REGION`, its config |
+| `MBSE_DYNAMODB_ENDPOINT_URL` | `endpoint_url` | AWS's; `http://localhost:8000` for DynamoDB Local |
+| `MBSE_DYNAMODB_CREATE` | `create` | `1`: make the table if absent (on-demand capacity), and wait until it is active; `0`, `false` or `no` not to |
+
+Credentials are boto3's own (`AWS_ACCESS_KEY_ID`, `AWS_PROFILE`, ...). `client=` takes a boto3 client in place of
+one the plugin makes, and `part_bytes=` (350 000) bounds each part. `Plugin.from_environment(environ, **options)` reads
+a mapping given in place of the process's environment.
+
+`Demo.work_tracker()` is mbse-rest's `Service.work_tracker` given `Plugin()`: an ASGI factory that serves the
+WorkTracker over DynamoDB with mbse-rest as pinned here (M0's), which has no configuration that selects a plugin.
 
 ## Tests
 
@@ -67,18 +75,19 @@ would be reusable as they are meant to be if mbse-rest's cases took the plugin f
 `Memory()`, overridable by a dependent's `conftest.py`) and asserted through the protocol alone: `load()` for what is
 held, and a count of snapshots taken by a wrapper the case makes, rather than `plugin.snapshots` and `plugin.entries`.
 
-## What mbse-rest's service needs to select it
+## How mbse-rest's service selects it
 
-mbse-rest's service is given its plugin (`Service.app(installs, plugin, snapshot_every)`); it has no configuration
-yet that chooses one. What this plugin needs from that configuration, and nothing more:
+mbse-rest's M1 (its PR #2, branch `m1-service`, not merged when this was written) selects a plugin with
+`MBSE_REST_PLUGIN=module:attribute`, calling the attribute with no arguments (`Service.plugin_of`). For this plugin:
 
-1. A way to name the plugin without mbse-rest importing mbse-dynamodb: for example an environment variable
-   `MBSE_PERSISTENCE=mbse.Persistence.DynamoDB.Plugin:Plugin.from_environment`, a callable the service imports and
-   calls with no arguments, `Memory` where it is unset.
-2. The plugin's own settings stay the plugin's (`MBSE_DYNAMODB_*`, the AWS environment); the service passes nothing
-   through.
-3. `snapshot_every` configurable (for example `MBSE_SNAPSHOT_EVERY`), since with DynamoDB a snapshot costs a write
-   of the whole store.
+```sh
+MBSE_REST_PLUGIN=mbse.Persistence.DynamoDB.Plugin:Plugin
+```
+
+`mbse.Persistence.DynamoDB:Plugin`, the package's attribute, is the module `Plugin.py`, not the class, and is not
+callable: the module path above names the class. `tests/test_plugin.py` makes the plugin by that name, as the service
+would. Beyond that, the plugin needs nothing from the service: its settings are its own (`MBSE_DYNAMODB_*`, the AWS
+environment). A configurable `snapshot_every` would help, since with DynamoDB a snapshot writes the whole store.
 
 ## Decided by the agent, for review
 
@@ -98,7 +107,9 @@ Where VISUALIZATION.md and CONTRACT.md are silent, the simplest default consiste
 6. **A second writer is refused**, not merged: CONTRACT.md's Decided 13 has one service, one lock, one store.
 7. **The table is made when absent by default** (`create=True`, on-demand capacity), for demos; production sets
    `MBSE_DYNAMODB_CREATE=0` and makes the table with its own tooling.
-8. **`Demo.work_tracker`** lives here, so the demo can run over DynamoDB before mbse-rest's service has a
-   configuration that selects a plugin.
+8. **`Demo.work_tracker`** lives here, so the demo can run over DynamoDB with mbse-rest as pinned (M0's), before
+   M1's `MBSE_REST_PLUGIN` is merged and pinned.
+10. **Settings from `MBSE_DYNAMODB_*`**, read by `Plugin()` with no arguments (as M1's `MBSE_REST_PLUGIN` calls it),
+    each overridden by an argument; the region falls back to boto3's own.
 9. **mbse-demo-apps is a development dependency** (the WorkTracker, for tests and the demo), pinned in
    `siblings.json` like the others.

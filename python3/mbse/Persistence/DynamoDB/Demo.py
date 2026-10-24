@@ -1,5 +1,5 @@
 """The WorkTracker demo service (mbse-rest's `Service.work_tracker`) persisted in DynamoDB (CAP-013), configured by
-the environment as `Plugin.from_environment` reads it. Until mbse-rest's service selects its plugin by configuration of
+the environment as `Plugin.Plugin()` reads it. Until mbse-rest's service selects its plugin by configuration of
 its own, serve this factory instead of mbse-rest's:
 
     MBSE_DYNAMODB_ENDPOINT_URL=http://localhost:8000 AWS_REGION=us-east-1 \\
@@ -21,4 +21,4 @@ __all__ = ["work_tracker"]
 
 def work_tracker() -> Any:
     """mbse-rest's WorkTracker application, its store loaded from, and journaled to, DynamoDB."""
-    return Service.work_tracker(Plugin.Plugin.from_environment())
+    return Service.work_tracker(Plugin.Plugin())

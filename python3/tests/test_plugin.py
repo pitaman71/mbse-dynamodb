@@ -176,3 +176,17 @@ def test_configured_by_the_environment(aws):
     with pytest.raises(ClientError, match="ResourceNotFound"):
         absent.load()
     assert not plugin.create_table()  # there already
+
+
+def test_made_by_name_with_no_arguments(aws, monkeypatch):
+    """As mbse-rest's service makes its plugin: `MBSE_REST_PLUGIN=module:attribute`, called with no arguments."""
+    import importlib
+
+    module, attribute = "mbse.Persistence.DynamoDB.Plugin:Plugin".split(":")
+    monkeypatch.setenv("MBSE_DYNAMODB_TABLE", "by-name")
+    monkeypatch.setenv("MBSE_DYNAMODB_REGION", "eu-west-1")
+    plugin = getattr(importlib.import_module(module), attribute)()
+    assert isinstance(plugin, Persistence.Plugin)
+    assert (plugin.table, plugin.store, plugin.client.meta.region_name) == ("by-name", "store", "eu-west-1")
+    assert plugin.load() == (None, [])
+    assert Plugin.Plugin(table="explicit").table == "explicit"  # an argument overrides the environment

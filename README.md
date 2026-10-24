@@ -28,7 +28,7 @@ from mbse.Services.Rest import Service
 
 plugin = Plugin.Plugin("mbse-store", region="us-east-1")          # on AWS, with boto3's credentials
 plugin = Plugin.Plugin("mbse-store", endpoint_url="http://localhost:8000", region="us-east-1")  # DynamoDB Local
-plugin = Plugin.Plugin.from_environment()                          # MBSE_DYNAMODB_* and AWS_* (docs/DESIGN.md)
+plugin = Plugin.Plugin()                                           # every setting from MBSE_DYNAMODB_* (docs/DESIGN.md)
 app = Service.app(installs, plugin)                                # mbse-rest's service, persisted
 ```
 
@@ -49,8 +49,9 @@ The first start runs the WorkTracker's installs and snapshots them into the tabl
 journaled, and a restart reads it all back. DynamoDB Local accepts any credentials. `docker stop dynamodb-local`
 stops it, and, as run here without a volume, forgets the table.
 
-`Demo.work_tracker` serves mbse-rest's WorkTracker service with this plugin, until mbse-rest's service can select
-its plugin by configuration (docs/DESIGN.md, "What mbse-rest's service needs to select it").
+`Demo.work_tracker` serves mbse-rest's WorkTracker service with this plugin. With an mbse-rest whose service selects
+its plugin by name (M1's `MBSE_REST_PLUGIN`), serve mbse-rest's own factory instead, with the same environment and
+`MBSE_REST_PLUGIN=mbse.Persistence.DynamoDB.Plugin:Plugin` (docs/DESIGN.md, "How mbse-rest's service selects it").
 
 ## Testing it
 

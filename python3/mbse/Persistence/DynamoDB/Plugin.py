@@ -24,7 +24,7 @@ from botocore.exceptions import ClientError
 
 from mbse.Services.Rest.Persistence import PlainData
 
-__all__ = ["Plugin", "DEFAULT_TABLE", "DEFAULT_STORE", "PART_BYTES", "JOURNAL", "SNAPSHOT"]
+__all__ = ["Plugin", "environment", "DEFAULT_TABLE", "DEFAULT_STORE", "PART_BYTES", "JOURNAL", "SNAPSHOT"]
 
 DEFAULT_TABLE = "mbse-store"
 DEFAULT_STORE = "store"
@@ -45,18 +45,49 @@ def parse(sort_key: str) -> tuple[str, int, int]:
     return log, int(number), int(part)
 
 
+def environment(environ: Mapping[str, str]) -> dict[str, Any]:
+    """The plugin's settings as the environment gives them, each where an argument does not:
+
+    | Variable | Setting | Default |
+    |---|---|---|
+    | `MBSE_DYNAMODB_TABLE` | `table` | `mbse-store` |
+    | `MBSE_DYNAMODB_STORE` | `store` | `store` |
+    | `MBSE_DYNAMODB_REGION` | `region` | boto3's own (`AWS_REGION`, `AWS_DEFAULT_REGION`, its config) |
+    | `MBSE_DYNAMODB_ENDPOINT_URL` | `endpoint_url` | AWS's; `http://localhost:8000` for DynamoDB Local |
+    | `MBSE_DYNAMODB_CREATE` | `create` | `1`; `0`, `false` or `no` not to make the table |
+
+    Credentials are boto3's own (`AWS_ACCESS_KEY_ID`, `AWS_PROFILE`, ...)."""
+    return {
+        "table": environ.get("MBSE_DYNAMODB_TABLE") or DEFAULT_TABLE,
+        "store": environ.get("MBSE_DYNAMODB_STORE") or DEFAULT_STORE,
+        "region": environ.get("MBSE_DYNAMODB_REGION") or None,
+        "endpoint_url": environ.get("MBSE_DYNAMODB_ENDPOINT_URL") or None,
+        "create": environ.get("MBSE_DYNAMODB_CREATE", "1").lower() not in ("0", "false", "no"),
+    }
+
+
 class Plugin:
     """`mbse.Services.Rest.Persistence.Plugin` over one DynamoDB table.
 
+    `Plugin()`, with no arguments, takes every setting from the environment (`environment`, above), so that a service
+    can make it by name (mbse-rest's `MBSE_REST_PLUGIN=mbse.Persistence.DynamoDB.Plugin:Plugin`). An argument given
+    overrides the environment; `environ`, where given, is read in place of the process's.
+
     `table` is the table's name, `store` the partition key that holds this store, so that several stores may share a
-    table. `region` and `endpoint_url` go to boto3 as given (an endpoint URL such as `http://localhost:8000` for
-    DynamoDB Local); `client`, where given, is used instead. Where `create`, the table is made if absent (on demand
-    capacity). `part_bytes` bounds each part's data.
+    table. `region` and `endpoint_url` go to boto3 (an endpoint URL such as `http://localhost:8000` for DynamoDB
+    Local); `client`, where given, is used instead. Where `create`, the table is made if absent (on-demand capacity).
+    `part_bytes` bounds each part's data.
     """
 
-    def __init__(self, table: str = DEFAULT_TABLE, *, store: str = DEFAULT_STORE, region: str | None = None,
-                 endpoint_url: str | None = None, client: Any = None, create: bool = True,
-                 part_bytes: int = PART_BYTES) -> None:
+    def __init__(self, table: str | None = None, *, store: str | None = None, region: str | None = None,
+                 endpoint_url: str | None = None, client: Any = None, create: bool | None = None,
+                 part_bytes: int = PART_BYTES, environ: Mapping[str, str] | None = None) -> None:
+        settings = environment(os.environ if environ is None else environ)
+        table = table if table is not None else settings["table"]
+        store = store if store is not None else settings["store"]
+        region = region if region is not None else settings["region"]
+        endpoint_url = endpoint_url if endpoint_url is not None else settings["endpoint_url"]
+        create = create if create is not None else settings["create"]
         if part_bytes < 1:
             raise ValueError(f"part_bytes must be positive, not {part_bytes}")
         self.table, self.store, self.part_bytes = table, store, part_bytes
@@ -68,19 +99,9 @@ class Plugin:
 
     @classmethod
     def from_environment(cls, environ: Mapping[str, str] | None = None, **options: Any) -> Plugin:
-        """A plugin configured by the environment, for a service: `MBSE_DYNAMODB_TABLE` (default `mbse-store`),
-        `MBSE_DYNAMODB_STORE` (default `store`), `MBSE_DYNAMODB_ENDPOINT_URL` (unset for AWS) and
-        `MBSE_DYNAMODB_CREATE` (`0` not to make the table). The region and credentials are boto3's own
-        (`AWS_REGION`, `AWS_ACCESS_KEY_ID`, ...). `options` override the environment."""
-        env = os.environ if environ is None else environ
-        settings: dict[str, Any] = {
-            "table": env.get("MBSE_DYNAMODB_TABLE", DEFAULT_TABLE),
-            "store": env.get("MBSE_DYNAMODB_STORE", DEFAULT_STORE),
-            "endpoint_url": env.get("MBSE_DYNAMODB_ENDPOINT_URL") or None,
-            "create": env.get("MBSE_DYNAMODB_CREATE", "1") not in ("0", "false", "no"),
-        }
-        settings.update(options)
-        return cls(**settings)
+        """A plugin configured by `environ` (the process's environment by default), `options` overriding it; the
+        same as `Plugin(**options, environ=environ)`."""
+        return cls(**options, environ=environ)
 
     # --- The table ---
 

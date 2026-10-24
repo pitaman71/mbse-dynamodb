@@ -17,6 +17,8 @@ def aws(monkeypatch):
     for name, value in {"AWS_ACCESS_KEY_ID": "testing", "AWS_SECRET_ACCESS_KEY": "testing",
                         "AWS_SESSION_TOKEN": "testing", "AWS_DEFAULT_REGION": REGION, "AWS_REGION": REGION}.items():
         monkeypatch.setenv(name, value)
+    for name in ("TABLE", "STORE", "REGION", "ENDPOINT_URL", "CREATE"):  # the plugin's settings: none from the shell
+        monkeypatch.delenv(f"MBSE_DYNAMODB_{name}", raising=False)
     with mock_aws():
         yield boto3.client("dynamodb", region_name=REGION)
 
