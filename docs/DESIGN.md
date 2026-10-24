@@ -109,7 +109,7 @@ Where VISUALIZATION.md and CONTRACT.md are silent, the simplest default consiste
    `MBSE_DYNAMODB_CREATE=0` and makes the table with its own tooling.
 8. **`Demo.work_tracker`** lives here, so the demo can run over DynamoDB with mbse-rest as pinned (M0's), before
    M1's `MBSE_REST_PLUGIN` is merged and pinned.
-10. **Settings from `MBSE_DYNAMODB_*`**, read by `Plugin()` with no arguments (as M1's `MBSE_REST_PLUGIN` calls it),
-    each overridden by an argument; the region falls back to boto3's own.
 9. **mbse-demo-apps is a development dependency** (the WorkTracker, for tests and the demo), pinned in
    `siblings.json` like the others.
+10. **Settings from `MBSE_DYNAMODB_*`**, read by `Plugin()` with no arguments (as M1's `MBSE_REST_PLUGIN` calls it),
+    each overridden by an argument; the region falls back to boto3's own.
