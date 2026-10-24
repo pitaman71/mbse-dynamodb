@@ -114,6 +114,8 @@ class Plugin:
             item = self._record(SNAPSHOT, latest)
             snapshot, since = item["data"], item["since"]
         journal = [record["data"] for record in self._records(JOURNAL, since)]
+        # what the service writes next follows what it loaded, so that another writer since is refused
+        self._next = {JOURNAL: since + len(journal), SNAPSHOT: 0 if latest is None else latest + 1}
         return snapshot, journal
 
     def journal(self, transaction: PlainData) -> None:
