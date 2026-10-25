@@ -50,34 +50,18 @@ Credentials are boto3's own (`AWS_ACCESS_KEY_ID`, `AWS_PROFILE`, ...). `client=`
 one the plugin makes, and `part_bytes=` (350 000) bounds each part. `Plugin.from_environment(environ, **options)` reads
 a mapping given in place of the process's environment.
 
-`Demo.work_tracker()` is mbse-rest's `Service.work_tracker` given `Plugin()`: an ASGI factory that serves the
-WorkTracker over DynamoDB with mbse-rest as pinned here (M0's), which has no configuration that selects a plugin.
-
 ## Tests
 
 - `tests/test_plugin.py`: the plugin's own cases over the WorkTracker in moto (no AWS account, no network).
-- `tests/test_rest.py`: mbse-rest's persistence cases (its `tests/test_service.py`), run unchanged from the sibling
-  checkout, with this plugin in place of `Persistence.Memory`; see "Reusing mbse-rest's cases", below. It also runs
-  `Demo.work_tracker` twice over one table, a first start and a restart.
+- `tests/test_rest.py`: mbse-rest's persistence cases (`mbse.Services.Rest.PersistenceCases`), each given a maker of
+  fresh plugins over tables of their own; and mbse-rest's service as the environment configures it, selecting this
+  plugin by name, over one table twice, a first start and a restart.
 - `tests/test_local.py`: against DynamoDB Local, run where `MBSE_DYNAMODB_LOCAL` gives its endpoint, skipped
   otherwise.
 
-### Reusing mbse-rest's cases
-
-Those cases make `Persistence.Memory()` themselves and look at its `snapshots` and `entries`, which are `Memory`'s
-own, not the protocol's. `test_rest.py` loads mbse-rest's test module from the sibling and replaces, in that module
-only, `Persistence` with mbse-rest's members and `Memory` set to `Recording`, this plugin over a mocked table whose
-`snapshots` and `entries` are read back from the table. It also fails when mbse-rest adds a persistence case (one
-that makes a `Memory`) not yet listed here.
-
-That works, but it leans on two things that are not contract: the cases' names and the attributes of `Memory`. They
-would be reusable as they are meant to be if mbse-rest's cases took the plugin from a fixture (`plugin`, defaulting to
-`Memory()`, overridable by a dependent's `conftest.py`) and asserted through the protocol alone: `load()` for what is
-held, and a count of snapshots taken by a wrapper the case makes, rather than `plugin.snapshots` and `plugin.entries`.
-
 ## How mbse-rest's service selects it
 
-mbse-rest's M1 (its PR #2, branch `m1-service`, not merged when this was written) selects a plugin with
+mbse-rest's service selects a plugin with
 `MBSE_REST_PLUGIN=module:attribute`, calling the attribute with no arguments (`Service.plugin_of`). For this plugin:
 
 ```sh
@@ -87,7 +71,8 @@ MBSE_REST_PLUGIN=mbse.Persistence.DynamoDB.Plugin:Plugin
 `mbse.Persistence.DynamoDB:Plugin`, the package's attribute, is the module `Plugin.py`, not the class, and is not
 callable: the module path above names the class. `tests/test_plugin.py` makes the plugin by that name, as the service
 would. Beyond that, the plugin needs nothing from the service: its settings are its own (`MBSE_DYNAMODB_*`, the AWS
-environment). A configurable `snapshot_every` would help, since with DynamoDB a snapshot writes the whole store.
+environment). Since a snapshot writes the whole store, `MBSE_REST_SNAPSHOT_EVERY` (100 by default) sets how many journaled
+transactions come between snapshots.
 
 ## Decided by the agent, for review
 
@@ -107,8 +92,7 @@ Where VISUALIZATION.md and CONTRACT.md are silent, the simplest default consiste
 6. **A second writer is refused**, not merged: CONTRACT.md's Decided 13 has one service, one lock, one store.
 7. **The table is made when absent by default** (`create=True`, on-demand capacity), for demos; production sets
    `MBSE_DYNAMODB_CREATE=0` and makes the table with its own tooling.
-8. **`Demo.work_tracker`** lives here, so the demo can run over DynamoDB with mbse-rest as pinned (M0's), before
-   M1's `MBSE_REST_PLUGIN` is merged and pinned.
+8. *(Withdrawn in M4: `Demo.work_tracker` went once mbse-rest's service selected its plugin by name.)*
 9. **mbse-demo-apps is a development dependency** (the WorkTracker, for tests and the demo), pinned in
    `siblings.json` like the others.
 10. **Settings from `MBSE_DYNAMODB_*`**, read by `Plugin()` with no arguments (as M1's `MBSE_REST_PLUGIN` calls it),
