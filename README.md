@@ -42,16 +42,17 @@ docker run -d --rm --name dynamodb-local -p 8000:8000 amazon/dynamodb-local    #
 cd python3 && uv sync
 MBSE_DYNAMODB_ENDPOINT_URL=http://localhost:8000 AWS_REGION=us-east-1 \
 AWS_ACCESS_KEY_ID=local AWS_SECRET_ACCESS_KEY=local \
-  uv run --with uvicorn uvicorn --factory mbse.Persistence.DynamoDB.Demo:work_tracker
+MBSE_REST_PLUGIN=mbse.Persistence.DynamoDB.Plugin:Plugin \
+  uv run python -m mbse.Services.Rest
 ```
 
 The first start runs the WorkTracker's installs and snapshots them into the table `mbse-store`; every write after is
 journaled, and a restart reads it all back. DynamoDB Local accepts any credentials. `docker stop dynamodb-local`
 stops it, and, as run here without a volume, forgets the table.
 
-`Demo.work_tracker` serves mbse-rest's WorkTracker service with this plugin. With an mbse-rest whose service selects
-its plugin by name (M1's `MBSE_REST_PLUGIN`), serve mbse-rest's own factory instead, with the same environment and
-`MBSE_REST_PLUGIN=mbse.Persistence.DynamoDB.Plugin:Plugin` (docs/DESIGN.md, "How mbse-rest's service selects it").
+mbse-rest's service (`python -m mbse.Services.Rest`, its README) selects this plugin by name through
+`MBSE_REST_PLUGIN`, and the plugin takes its own settings from `MBSE_DYNAMODB_*` (docs/DESIGN.md, "How mbse-rest's
+service selects it").
 
 ## Testing it
 
