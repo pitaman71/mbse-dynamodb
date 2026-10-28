@@ -1,6 +1,6 @@
 # Guide for AI agents
 
-An in-memory store journaled to DynamoDB, each committed transaction a journal entry, with occasional snapshots (mbse-basis FEA-006, CAP-013). Python, in `python3/mbse/Persistence/DynamoDB` (`mbse.Persistence.DynamoDB`).
+An in-memory store journaled to DynamoDB, each committed transaction a journal entry, with occasional snapshots (mbse-basis [FEA-006: persistence](../mbse-basis/docs/features/FEA-006.md), [CAP-013: an in-memory store journaled to DynamoDB](../mbse-basis/docs/capabilities/CAP-013.md)). Python, in `python3/mbse/Persistence/DynamoDB` (`mbse.Persistence.DynamoDB`).
 
 ## Invariants
 
@@ -8,11 +8,11 @@ An in-memory store journaled to DynamoDB, each committed transaction a journal e
 - **Siblings are checkouts beside this repository**, pinned by commit in `siblings.json`. Other agents may be working
   in them: never edit a sibling from here.
 - **What this repository builds is specified in mbse-basis' features and capabilities**
-  (`../mbse-basis/docs/features/`, `../mbse-basis/docs/capabilities/`), by ID; cite those IDs, each introduced
-  by bridge language (mbse-basis `docs/README.md`, Rules for writing items, "Bridge, don't duplicate").
+  ([`mbse-basis/docs/features/`](../mbse-basis/docs/features), [`mbse-basis/docs/capabilities/`](../mbse-basis/docs/capabilities)), by ID; cite those IDs, each introduced
+  by bridge language (mbse-basis [`docs/README.md`](../mbse-basis/docs/README.md), Rules for writing items, "Bridge, don't duplicate").
 - **Tests run with pytest** from `python3/`: `uv sync && uv run pytest`. Use uv, never pip.
 - **It implements mbse-rest's persistence plugin**, `mbse.Services.Rest.Persistence.Plugin` (`load`, `journal`,
-  `snapshot`), as `mbse/Persistence/DynamoDB/Plugin.py`; mbse-rest's `docs/CONTRACT.md` (Persistence) is the contract
+  `snapshot`), as `mbse/Persistence/DynamoDB/Plugin.py`; mbse-rest's [`docs/CONTRACT.md`](../mbse-rest/docs/CONTRACT.md) (Persistence) is the contract
   and `Persistence.Memory` the reference it must agree with. mbse-rest is a sibling checkout, pinned in `siblings.json`.
 
 ## Working agreement (M0, for every agent on mbse-rest, mbse-dynamodb, mbse-react and mbse-demo-apps)
@@ -22,7 +22,7 @@ An in-memory store journaled to DynamoDB, each committed transaction a journal e
   every sibling). Never commit to `main`. When done, open one pull request per repository with `gh pr create`,
   listing the decisions for review.
 - Where the capabilities are silent, take the simplest default consistent with them and with mbse-schemas, record it
-  under "Decided by the agent, for review" (for the REST contract, in mbse-rest's `docs/CONTRACT.md`, from mbse-rest's
+  under "Decided by the agent, for review" (for the REST contract, in mbse-rest's [`docs/CONTRACT.md`](../mbse-rest/docs/CONTRACT.md), from mbse-rest's
   own work; otherwise in this repository's docs), and keep going.
 - Stop and report (do not work around) for: a gap or bug in mbse-schemas; an outward-facing action beyond pushing
   branches and opening pull requests in these repositories; anything destructive (force-push, deleting branches or
