@@ -1,7 +1,7 @@
 # Design: the DynamoDB persistence plugin
 
 `mbse.Persistence.DynamoDB.Plugin.Plugin` implements mbse-rest's `Persistence.Plugin` (mbse-rest [`docs/CONTRACT.md`](../../mbse-rest/docs/CONTRACT.md),
-Persistence) for mbse-basis [CAP-013: an in-memory store journaled to DynamoDB](../../mbse-basis/docs/capabilities/CAP-013.md) ([FEA-006](../../mbse-basis/docs/features/FEA-006.md)). The contract fixes what a plugin is given and gives back; this
+Persistence) for mbse-basis [CAP-013: an in-memory store journaled to DynamoDB](../../mbse-basis/docs/capabilities/CAP-013.md) ([FEA-006: persistence](../../mbse-basis/docs/features/FEA-006.md)). The contract fixes what a plugin is given and gives back; this
 page fixes how DynamoDB holds it.
 
 ## The table
