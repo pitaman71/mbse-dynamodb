@@ -1,7 +1,7 @@
 # Design: the DynamoDB persistence plugin
 
 `mbse.Persistence.DynamoDB.Plugin.Plugin` implements mbse-rest's `Persistence.Plugin` (mbse-rest `docs/CONTRACT.md`,
-Persistence) for VISUALIZATION.md's CAP-013 (FEA-006). The contract fixes what a plugin is given and gives back; this
+Persistence) for mbse-basis CAP-013 (FEA-006). The contract fixes what a plugin is given and gives back; this
 page fixes how DynamoDB holds it.
 
 ## The table
@@ -76,7 +76,7 @@ transactions come between snapshots.
 
 ## Decided by the agent, for review
 
-Where VISUALIZATION.md and CONTRACT.md are silent, the simplest default consistent with them:
+Where mbse-basis' capabilities and CONTRACT.md are silent, the simplest default consistent with them:
 
 1. **One table, keyed by store and record**, rather than a table each for the journal and snapshots: one thing to
    make and configure, and several stores (demos, tests) may share it.

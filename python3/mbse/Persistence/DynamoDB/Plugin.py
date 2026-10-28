@@ -1,4 +1,4 @@
-"""mbse-rest's persistence plugin over DynamoDB (VISUALIZATION.md, CAP-013; mbse-rest docs/CONTRACT.md, Persistence).
+"""mbse-rest's persistence plugin over DynamoDB (mbse-basis CAP-013; mbse-rest docs/CONTRACT.md, Persistence).
 
 A store's history is two append-only logs in one table, under one partition key (the store's name):
 

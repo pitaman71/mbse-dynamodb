@@ -1,14 +1,14 @@
 # Guide for AI agents
 
-An in-memory store journaled to DynamoDB, each committed transaction a journal entry, with occasional snapshots (VISUALIZATION.md, FEA-006, CAP-013). Python, in `python3/mbse/Persistence/DynamoDB` (`mbse.Persistence.DynamoDB`).
+An in-memory store journaled to DynamoDB, each committed transaction a journal entry, with occasional snapshots (mbse-basis FEA-006, CAP-013). Python, in `python3/mbse/Persistence/DynamoDB` (`mbse.Persistence.DynamoDB`).
 
 ## Invariants
 
 - **Use mbse-schemas as it stands.** A gap found is reported to the user, not worked around here.
 - **Siblings are checkouts beside this repository**, pinned by commit in `siblings.json`. Other agents may be working
   in them: never edit a sibling from here.
-- **What this repository builds is specified in the workspace's `VISUALIZATION.md`**, by feature and capability ID;
-  cite those IDs rather than restate them.
+- **What this repository builds is specified in mbse-basis' features and capabilities**
+  (`../mbse-basis/docs/features/`, `../mbse-basis/docs/capabilities/`), by ID; cite those IDs rather than restate them.
 - **Tests run with pytest** from `python3/`: `uv sync && uv run pytest`. Use uv, never pip.
 - **It implements mbse-rest's persistence plugin**, `mbse.Services.Rest.Persistence.Plugin` (`load`, `journal`,
   `snapshot`), as `mbse/Persistence/DynamoDB/Plugin.py`; mbse-rest's `docs/CONTRACT.md` (Persistence) is the contract
@@ -20,13 +20,13 @@ An in-memory store journaled to DynamoDB, each committed transaction a journal e
   tests pass (`git push -u origin <branch>`, or `python3 ../mbse-basis/scripts/polyrepo.py push` where it supports
   every sibling). Never commit to `main`. When done, open one pull request per repository with `gh pr create`,
   listing the decisions for review.
-- Where VISUALIZATION.md is silent, take the simplest default consistent with it and with mbse-schemas, record it
+- Where the capabilities are silent, take the simplest default consistent with them and with mbse-schemas, record it
   under "Decided by the agent, for review" (for the REST contract, in mbse-rest's `docs/CONTRACT.md`, from mbse-rest's
   own work; otherwise in this repository's docs), and keep going.
 - Stop and report (do not work around) for: a gap or bug in mbse-schemas; an outward-facing action beyond pushing
   branches and opening pull requests in these repositories; anything destructive (force-push, deleting branches or
-  files outside your work, rewriting history); a contradiction in VISUALIZATION.md that changes what gets built.
-- Never edit a sibling from another repository's work; never edit mbse-schemas, mbse-basis or VISUALIZATION.md.
+  files outside your work, rewriting history); a contradiction in a capability that changes what gets built.
+- Never edit a sibling from another repository's work; never edit mbse-schemas or mbse-basis.
 - Never write to `~/.claude/projects/*/memory/` or any hidden memory: what is worth keeping goes in the repository.
 - Conventions: Python with uv (`uv sync`, `uv run pytest`), never pip; package capitalization as mbse-schemas has it
   (`mbse.Services.Rest`); "property", never "field", and "schema", never "type", for schema-governed things. Models
