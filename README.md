@@ -8,10 +8,10 @@ storage code.
 mbse-rest's service holds its store in memory and executes transactions over it, which is fast and simple, but a
 store in memory is lost when the process ends. This package makes it last: each committed transaction that writes is
 journaled to DynamoDB, with occasional snapshots of the whole store, and a service starting up reads the latest
-snapshot and replays the journal after it (mbse-basis FEA-006, CAP-013). It stores only mbse-schemas' plain
+snapshot and replays the journal after it (mbse-basis [FEA-006: persistence](../mbse-basis/docs/features/FEA-006.md), [CAP-013: an in-memory store journaled to DynamoDB](../mbse-basis/docs/capabilities/CAP-013.md)). It stores only mbse-schemas' plain
 form, so it knows nothing of any app: the same table holds the WorkTracker or any other store.
 
-It implements mbse-rest's persistence plugin, `mbse.Services.Rest.Persistence.Plugin` (mbse-rest `docs/CONTRACT.md`,
+It implements mbse-rest's persistence plugin, `mbse.Services.Rest.Persistence.Plugin` (mbse-rest [`docs/CONTRACT.md`](../mbse-rest/docs/CONTRACT.md),
 Persistence), as `mbse.Persistence.DynamoDB.Plugin.Plugin`. How the table holds a journal and snapshots, and the
 decisions for review, are in [docs/DESIGN.md](docs/DESIGN.md).
 

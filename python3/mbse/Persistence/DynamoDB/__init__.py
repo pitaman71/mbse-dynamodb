@@ -1,1 +1,1 @@
-"""An mbse-schemas store journaled to DynamoDB (mbse-basis FEA-006)."""
+"""An mbse-schemas store journaled to DynamoDB (mbse-basis FEA-006: persistence)."""
