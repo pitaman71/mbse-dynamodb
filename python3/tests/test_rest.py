@@ -1,4 +1,4 @@
-"""mbse-rest's persistence cases (`mbse.Services.Rest.PersistenceCases`, mbse-rest docs/CONTRACT.md, Persistence), run
+"""mbse-rest's persistence cases (`mbse.Services.Rest.PersistenceCases`, mbse-basis CAP-013, the persistence plugin), run
 with this plugin, and mbse-rest's service selecting it by name, as `MBSE_REST_PLUGIN` does."""
 
 from __future__ import annotations
