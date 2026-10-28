@@ -8,7 +8,8 @@ An in-memory store journaled to DynamoDB, each committed transaction a journal e
 - **Siblings are checkouts beside this repository**, pinned by commit in `siblings.json`. Other agents may be working
   in them: never edit a sibling from here.
 - **What this repository builds is specified in mbse-basis' features and capabilities**
-  (`../mbse-basis/docs/features/`, `../mbse-basis/docs/capabilities/`), by ID; cite those IDs rather than restate them.
+  (`../mbse-basis/docs/features/`, `../mbse-basis/docs/capabilities/`), by ID; cite those IDs, each introduced
+  by bridge language (mbse-basis `docs/README.md`, Rules for writing items, "Bridge, don't duplicate").
 - **Tests run with pytest** from `python3/`: `uv sync && uv run pytest`. Use uv, never pip.
 - **It implements mbse-rest's persistence plugin**, `mbse.Services.Rest.Persistence.Plugin` (`load`, `journal`,
   `snapshot`), as `mbse/Persistence/DynamoDB/Plugin.py`; mbse-rest's `docs/CONTRACT.md` (Persistence) is the contract
