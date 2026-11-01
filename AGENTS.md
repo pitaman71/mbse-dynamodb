@@ -13,15 +13,15 @@ only what differs here.
 - **Documents**: navigation lines, the README opening with why, and what this file holds ([Rules for every document](../mbse-basis/docs/README.md#rules-for-every-document)).
 - **Work**: [PRI-029: parallel work in polyrepo workspaces](../mbse-basis/docs/PRINCIPLES.md#PRI-029), [PRI-031: the version is the contract](../mbse-basis/docs/PRINCIPLES.md#PRI-031), [PRI-032: a sibling's gap is reported, not worked around](../mbse-basis/docs/PRINCIPLES.md#PRI-032) and [PRI-033: work lands by branch and pull request](../mbse-basis/docs/PRINCIPLES.md#PRI-033).
 - **What this repository builds is specified in mbse-basis' features and capabilities**, cited by ID ([Detail files](../mbse-basis/docs/README.md#detail-files)).
-- **Siblings are checkouts beside this repository**, pinned by version and commit in `siblings.json`
-  (`python3 ../mbse-basis/scripts/polyrepo.py pin`).
-- **Tests run with pytest** from `python3/`: `uv sync && uv run pytest`. Use uv, never pip. `tests/test_plugin.py`
-  runs the plugin's own cases over the WorkTracker in moto (no AWS account, no network); `tests/test_rest.py`, mbse-rest's
-  persistence cases (`mbse.Services.Rest.PersistenceCases`), each given a maker of fresh plugins over tables of their
-  own, and mbse-rest's service as the environment configures it, selecting this plugin by name, over one table twice,
-  a first start and a restart; `tests/test_local.py`, against DynamoDB Local, run where `MBSE_DYNAMODB_LOCAL` gives
-  its endpoint, skipped otherwise.
 - **It implements mbse-rest's persistence plugin**, `mbse.Services.Rest.Persistence.Plugin` (`load`, `journal`,
   `snapshot`), as `mbse/Persistence/DynamoDB/Plugin.py`; [CAP-013: an in-memory store journaled to DynamoDB](../mbse-basis/docs/capabilities/CAP-013.md#the-persistence-plugin), as built, is the contract
-  and `Persistence.Memory` the reference it must agree with. mbse-rest is a sibling checkout, pinned in `siblings.json`.
+  and `Persistence.Memory` the reference it must agree with.
 - Never write to `~/.claude/projects/*/memory/` or any hidden memory: what is worth keeping goes in the repository.
+
+## Commands
+
+```sh
+python3 ../mbse-basis/scripts/polyrepo.py pin   # the siblings beside this repository, pinned in siblings.json
+cd python3 && uv sync && uv run pytest          # Python: use uv, never pip; DynamoDB mocked by moto
+MBSE_DYNAMODB_LOCAL=http://localhost:8000 uv run pytest tests/test_local.py   # against DynamoDB Local
+```
