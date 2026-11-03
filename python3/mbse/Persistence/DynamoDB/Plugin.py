@@ -1,4 +1,4 @@
-"""mbse-rest's persistence plugin over DynamoDB (mbse-basis [CAP-013: an in-memory store journaled to DynamoDB](../../../../../mbse-basis/docs/capabilities/CAP-013.md), the persistence plugin, as built).
+"""mbse-rest's persistence plugin over DynamoDB (mbse-basis [CAP-013: an in-memory store journaled to DynamoDB](mbse:mbse-basis/docs/capabilities/CAP-013.md), the persistence plugin, as built).
 
 A store's history is two append-only logs in one table, under one partition key (the store's name):
 
@@ -9,7 +9,7 @@ Each record is its plain form as UTF-8 JSON, cut into parts that each fit in an 
 part 0 is written last, and only on condition that it is new: a record is there exactly when its part 0 is, so a
 write that fails leaves nothing `load` reads, and a second writer is refused rather than interleaved. `load` gives
 the latest snapshot and the journal from its `since` on. Nothing is ever deleted. The design and its reasons are
-[CAP-013: an in-memory store journaled to DynamoDB](../../../../../mbse-basis/docs/capabilities/CAP-013.md)'s, as built.
+[CAP-013: an in-memory store journaled to DynamoDB](mbse:mbse-basis/docs/capabilities/CAP-013.md)'s, as built.
 """
 
 from __future__ import annotations

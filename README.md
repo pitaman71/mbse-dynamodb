@@ -8,12 +8,12 @@ storage code.
 mbse-rest's service holds its store in memory and executes transactions over it, which is fast and simple, but a
 store in memory is lost when the process ends. This package makes it last: each committed transaction that writes is
 journaled to DynamoDB, with occasional snapshots of the whole store, and a service starting up reads the latest
-snapshot and replays the journal after it (mbse-basis [FEA-006: persistence](../mbse-basis/docs/features/FEA-006.md), [CAP-013: an in-memory store journaled to DynamoDB](../mbse-basis/docs/capabilities/CAP-013.md)). It stores only mbse-schemas' plain
+snapshot and replays the journal after it (mbse-basis [FEA-006: persistence](https://github.com/pitaman71/mbse-basis/blob/main/docs/features/FEA-006.md), [CAP-013: an in-memory store journaled to DynamoDB](https://github.com/pitaman71/mbse-basis/blob/main/docs/capabilities/CAP-013.md)). It stores only mbse-schemas' plain
 form, so it knows nothing of any app: the same table holds the WorkTracker or any other store.
 
-It implements mbse-rest's persistence plugin, `mbse.Services.Rest.Persistence.Plugin` ([CAP-013: an in-memory store journaled to DynamoDB](../mbse-basis/docs/capabilities/CAP-013.md#the-persistence-plugin)),
+It implements mbse-rest's persistence plugin, `mbse.Services.Rest.Persistence.Plugin` ([CAP-013: an in-memory store journaled to DynamoDB](https://github.com/pitaman71/mbse-basis/blob/main/docs/capabilities/CAP-013.md#the-persistence-plugin)),
 as `mbse.Persistence.DynamoDB.Plugin.Plugin`. How the table holds a journal and snapshots, and the decisions for
-review, are in CAP-013's [As built](../mbse-basis/docs/capabilities/CAP-013.md#the-dynamodb-plugin-its-table) and Decided sections.
+review, are in CAP-013's [As built](https://github.com/pitaman71/mbse-basis/blob/main/docs/capabilities/CAP-013.md#the-dynamodb-plugin-its-table) and Decided sections.
 
 It depends on [mbse-schemas](https://github.com/pitaman71/mbse-schemas) and
 [mbse-rest](https://github.com/pitaman71/mbse-rest), and for tests and the demo on
@@ -51,7 +51,7 @@ journaled, and a restart reads it all back. DynamoDB Local accepts any credentia
 stops it, and, as run here without a volume, forgets the table.
 
 mbse-rest's service (`python -m mbse.Services.Rest`, its README) selects this plugin by name through
-`MBSE_REST_PLUGIN`, and the plugin takes its own settings from `MBSE_DYNAMODB_*` ([CAP-013: an in-memory store journaled to DynamoDB](../mbse-basis/docs/capabilities/CAP-013.md#how-mbse-rests-service-selects-it),
+`MBSE_REST_PLUGIN`, and the plugin takes its own settings from `MBSE_DYNAMODB_*` ([CAP-013: an in-memory store journaled to DynamoDB](https://github.com/pitaman71/mbse-basis/blob/main/docs/capabilities/CAP-013.md#how-mbse-rests-service-selects-it),
 how mbse-rest's service selects it).
 
 ## Testing it
