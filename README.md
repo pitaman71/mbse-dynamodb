@@ -18,7 +18,7 @@ review, are in CAP-013's [As built](https://github.com/pitaman71/mbse-basis/blob
 It depends on [mbse-schemas](https://github.com/pitaman71/mbse-schemas) and
 [mbse-rest](https://github.com/pitaman71/mbse-rest), and for tests and the demo on
 [mbse-demo-apps](https://github.com/pitaman71/mbse-demo-apps)' WorkTracker, each a checkout beside this repository
-pinned in [siblings.json](siblings.json).
+pinned in `siblings.json`.
 
 ## Using it
 
