@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "An mbse-schemas store journaled to DynamoDB (mbse-basis [FEA-006: persistence](../../mbse-basis/docs/features/FEA-006.md))."
 requires-python = ">=3.11"
 dependencies = [
-    "mbse-schemas>=0.26.2,<0.27",
+    "mbse-schemas>=0.26.16,<0.27",
     "mbse-rest>=0.1.0,<0.2",
     "boto3>=1.43.118",
 ]
@@ -21,6 +21,7 @@ namespaces = true
 dev = [
     "httpx2>=2.16",
     "mbse-demo-apps>=0.1.0,<0.2",
+    "mbse-journals>=0.2.0,<0.3",
     "moto[dynamodb]>=5.2.4",
     "pytest>=9.1.1",
 ]
@@ -29,6 +30,7 @@ dev = [
 mbse-schemas = { path = "../../mbse-schemas/python3", editable = true }  # the sibling checkouts: ../mbse-basis/scripts/polyrepo.py
 mbse-rest = { path = "../../mbse-rest/python3", editable = true }
 mbse-demo-apps = { path = "../../mbse-demo-apps/python3", editable = true }
+mbse-journals = { path = "../../mbse-journals/python3", editable = true }
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
