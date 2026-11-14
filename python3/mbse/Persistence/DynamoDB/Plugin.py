@@ -1,5 +1,10 @@
 """mbse-rest's persistence plugin over DynamoDB (mbse-basis [CAP-013: an in-memory store journaled to DynamoDB](mbse:mbse-basis/docs/capabilities/CAP-013.md), the persistence plugin, as built).
 
+Superseded by `Store`, a store kept in DynamoDB, which keeps no snapshot
+([CAP-289: journals kept in DynamoDB](mbse:mbse-basis/docs/capabilities/README.md#CAP-289)). It is kept, unchanged, while
+mbse-rest's service persists through it, until that service is stacked over a store kept in a database
+([CAP-290: a service's store stacked, with no snapshot](mbse:mbse-basis/docs/capabilities/README.md#CAP-290)), when it goes.
+
 A store's history is two append-only logs in one table, under one partition key (the store's name):
 
 - its journal, each committed transaction that writes, numbered in commit order from 0;
@@ -48,7 +53,7 @@ def parse(sort_key: str) -> tuple[str, int, int]:
 class Plugin:
     """`mbse.Services.Rest.Persistence.Plugin` over one DynamoDB table.
 
-    `Plugin()`, with no arguments, takes every setting from the environment (`environment`, above), so that a service
+    `Plugin()`, with no arguments, takes every setting from the environment (`Table.environment`), so that a service
     can make it by name (mbse-rest's `MBSE_REST_PLUGIN=mbse.Persistence.DynamoDB.Plugin:Plugin`). An argument given
     overrides the environment; `environ`, where given, is read in place of the process's.
 
