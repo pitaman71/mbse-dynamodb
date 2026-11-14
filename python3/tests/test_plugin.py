@@ -190,3 +190,29 @@ def test_made_by_name_with_no_arguments(aws, monkeypatch):
     assert (plugin.table, plugin.store, plugin.client.meta.region_name) == ("by-name", "store", "eu-west-1")
     assert plugin.load() == (None, [])
     assert Plugin.Plugin(table="explicit").table == "explicit"  # an argument overrides the environment
+
+
+def test_parts_must_have_room(aws):
+    with pytest.raises(ValueError, match="part_bytes must be positive"):
+        Plugin.Plugin("mbse-test", region=REGION, part_bytes=0)
+
+
+def test_read_in_pages(aws):
+    """DynamoDB gives a query's items in pages: each is read."""
+    plugin = Plugin.Plugin("mbse-test", region=REGION, part_bytes=200)
+    store = work_tracker()
+    given = [add_tasks(store, [f"Task {n}"], first=100 + n) for n in range(3)]
+    for plain in given:
+        plugin.journal(plain)
+    query = plugin.client.query
+    plugin.client.query = lambda **request: query(**request, Limit=2)
+    assert plugin.load() == (None, given)
+
+
+def test_a_record_missing_a_part_is_refused(aws):
+    plugin = Plugin.Plugin("mbse-test", region=REGION, part_bytes=200)
+    store = work_tracker()
+    plugin.journal(add_tasks(store, ["Task"], first=100))
+    aws.delete_item(TableName="mbse-test", Key={"store": {"S": "store"}, "key": {"S": Plugin.key(Plugin.JOURNAL, 0, 1)}})
+    with pytest.raises(RuntimeError, match="has [0-9]+ of its [0-9]+ parts"):
+        plugin.load()

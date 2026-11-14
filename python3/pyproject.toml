@@ -19,6 +19,7 @@ namespaces = true
 
 [dependency-groups]
 dev = [
+    "coverage[toml]>=7.10",
     "httpx2>=2.16",
     "mbse-demo-apps>=0.1.0,<0.2",
     "mbse-journals>=0.2.0,<0.3",
@@ -34,3 +35,11 @@ mbse-journals = { path = "../../mbse-journals/python3", editable = true }
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.coverage.run]
+source = ["mbse.Persistence.DynamoDB"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+fail_under = 100

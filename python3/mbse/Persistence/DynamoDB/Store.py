@@ -294,16 +294,13 @@ class Store(Builders.Store):
             writes[_object_key(path) + "V"] = _dumps({
                 "path": path, "schema": Plain._schema_path(self._path(schema)), "values": values})
         for path in [*deleted, *Proxies._gone_paths(proposals, self)]:
-            self._erase(path, writes, set())
+            self._erase(path, writes)
         return writes
 
-    def _erase(self, path: Any, writes: dict[str, str | None], seen: set[str]) -> None:
+    def _erase(self, path: Any, writes: dict[str, str | None]) -> None:
         """The index items of a deleted object go, with each entry that links it, under every object it links, and
         each object it owns, in cascade, as its deletion removes them in every store."""
         prefix = _object_key(path)
-        if prefix in seen:
-            return
-        seen.add(prefix)
         own = _canonical(path)
         for item in self._query(prefix, prefix + END):
             key = item["key"]["S"]
@@ -317,7 +314,7 @@ class Store(Builders.Store):
                     continue
                 writes[_object_key(linked) + key[len(prefix):]] = None
                 if _canonical(linked) != own and Proxies._owns_through(relation, link, self):
-                    self._erase(linked, writes, seen)
+                    self._erase(linked, writes)
 
     # --- The index: what a read gives ---
 
@@ -329,6 +326,9 @@ class Store(Builders.Store):
         if head is not None:
             schema_path = head["schema"]
             schema = Plain._by_path(self, schema_path, ())
+            if schema is None:
+                raise LookupError(f"{self.table}/{self.store_name}: the object at {_canonical(path)} is of a schema the "
+                                  f"store does not hold, at {_canonical(schema_path)}: install its schemas")
             values = head["values"]
         elif not steps and singleton in self._singletons:
             schema = object.__getattribute__(self._singletons[singleton], "_schema")
