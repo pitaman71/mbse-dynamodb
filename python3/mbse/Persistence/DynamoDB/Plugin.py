@@ -1,5 +1,10 @@
 """mbse-rest's persistence plugin over DynamoDB (mbse-basis [CAP-013: an in-memory store journaled to DynamoDB](mbse:mbse-basis/docs/capabilities/CAP-013.md), the persistence plugin, as built).
 
+Superseded by `Store`, a store kept in DynamoDB, which keeps no snapshot
+([CAP-289: journals kept in DynamoDB](mbse:mbse-basis/docs/capabilities/README.md#CAP-289)). It is kept, unchanged, while
+mbse-rest's service persists through it, until that service is stacked over a store kept in a database
+([CAP-290: a service's store stacked, with no snapshot](mbse:mbse-basis/docs/capabilities/README.md#CAP-290)), when it goes.
+
 A store's history is two append-only logs in one table, under one partition key (the store's name):
 
 - its journal, each committed transaction that writes, numbered in commit order from 0;
@@ -24,10 +29,10 @@ from botocore.exceptions import ClientError
 
 from mbse.Services.Rest.Persistence import PlainData
 
+from .Table import DEFAULT_STORE, DEFAULT_TABLE, create_table, environment
+
 __all__ = ["Plugin", "environment", "DEFAULT_TABLE", "DEFAULT_STORE", "PART_BYTES", "JOURNAL", "SNAPSHOT"]
 
-DEFAULT_TABLE = "mbse-store"
-DEFAULT_STORE = "store"
 PART_BYTES = 350_000  # each part's data, leaving room under 400 KB for the item's keys and attributes
 JOURNAL, SNAPSHOT = "J", "S"  # the two logs, the first letter of each record's sort key
 WIDTH = 20  # digits in a record's number, so that sort keys sort as numbers
@@ -45,31 +50,10 @@ def parse(sort_key: str) -> tuple[str, int, int]:
     return log, int(number), int(part)
 
 
-def environment(environ: Mapping[str, str]) -> dict[str, Any]:
-    """The plugin's settings as the environment gives them, each where an argument does not:
-
-    | Variable | Setting | Default |
-    |---|---|---|
-    | `MBSE_DYNAMODB_TABLE` | `table` | `mbse-store` |
-    | `MBSE_DYNAMODB_STORE` | `store` | `store` |
-    | `MBSE_DYNAMODB_REGION` | `region` | boto3's own (`AWS_REGION`, `AWS_DEFAULT_REGION`, its config) |
-    | `MBSE_DYNAMODB_ENDPOINT_URL` | `endpoint_url` | AWS's; `http://localhost:8000` for DynamoDB Local |
-    | `MBSE_DYNAMODB_CREATE` | `create` | `1`; `0`, `false` or `no` not to make the table |
-
-    Credentials are boto3's own (`AWS_ACCESS_KEY_ID`, `AWS_PROFILE`, ...)."""
-    return {
-        "table": environ.get("MBSE_DYNAMODB_TABLE") or DEFAULT_TABLE,
-        "store": environ.get("MBSE_DYNAMODB_STORE") or DEFAULT_STORE,
-        "region": environ.get("MBSE_DYNAMODB_REGION") or None,
-        "endpoint_url": environ.get("MBSE_DYNAMODB_ENDPOINT_URL") or None,
-        "create": environ.get("MBSE_DYNAMODB_CREATE", "1").lower() not in ("0", "false", "no"),
-    }
-
-
 class Plugin:
     """`mbse.Services.Rest.Persistence.Plugin` over one DynamoDB table.
 
-    `Plugin()`, with no arguments, takes every setting from the environment (`environment`, above), so that a service
+    `Plugin()`, with no arguments, takes every setting from the environment (`Table.environment`), so that a service
     can make it by name (mbse-rest's `MBSE_REST_PLUGIN=mbse.Persistence.DynamoDB.Plugin:Plugin`). An argument given
     overrides the environment; `environ`, where given, is read in place of the process's.
 
@@ -107,24 +91,7 @@ class Plugin:
 
     def create_table(self) -> bool:
         """Makes the table if it is absent, and waits until it is active. Whether it was made."""
-        try:
-            self.client.describe_table(TableName=self.table)
-            return False
-        except ClientError as error:
-            if error.response["Error"]["Code"] != "ResourceNotFoundException":
-                raise
-        try:
-            self.client.create_table(
-                TableName=self.table, BillingMode="PAY_PER_REQUEST",
-                AttributeDefinitions=[{"AttributeName": "store", "AttributeType": "S"},
-                                      {"AttributeName": "key", "AttributeType": "S"}],
-                KeySchema=[{"AttributeName": "store", "KeyType": "HASH"},
-                           {"AttributeName": "key", "KeyType": "RANGE"}])
-        except ClientError as error:
-            if error.response["Error"]["Code"] != "ResourceInUseException":  # made meanwhile by another
-                raise
-        self.client.get_waiter("table_exists").wait(TableName=self.table)
-        return True
+        return create_table(self.client, self.table)
 
     # --- The protocol ---
 

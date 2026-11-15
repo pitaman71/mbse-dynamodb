@@ -5,10 +5,10 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "mbse-dynamodb"
 version = "0.1.0"
-description = "An mbse-schemas store journaled to DynamoDB (mbse-basis [FEA-006: persistence](../../mbse-basis/docs/features/FEA-006.md))."
+description = "mbse-schemas>=0.26.17,<0.27"
 requires-python = ">=3.11"
 dependencies = [
-    "mbse-schemas>=0.26.2,<0.27",
+    "mbse-schemas>=0.26.17,<0.27",
     "mbse-rest>=0.1.0,<0.2",
     "boto3>=1.43.118",
 ]
@@ -19,8 +19,10 @@ namespaces = true
 
 [dependency-groups]
 dev = [
+    "coverage[toml]>=7.10",
     "httpx2>=2.16",
     "mbse-demo-apps>=0.1.0,<0.2",
+    "mbse-journals>=0.2.0,<0.3",
     "moto[dynamodb]>=5.2.4",
     "pytest>=9.1.1",
 ]
@@ -29,6 +31,15 @@ dev = [
 mbse-schemas = { path = "../../mbse-schemas/python3", editable = true }  # the sibling checkouts: ../mbse-basis/scripts/polyrepo.py
 mbse-rest = { path = "../../mbse-rest/python3", editable = true }
 mbse-demo-apps = { path = "../../mbse-demo-apps/python3", editable = true }
+mbse-journals = { path = "../../mbse-journals/python3", editable = true }
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.coverage.run]
+source = ["mbse.Persistence.DynamoDB"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+fail_under = 100
