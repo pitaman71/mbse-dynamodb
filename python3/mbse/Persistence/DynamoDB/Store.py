@@ -129,7 +129,8 @@ class Store(Builders.Store):
             create_table(self.client, self.table)
         self.attempts, self.max_actions, self.max_bytes, self.part_bytes = attempts, max_actions, max_bytes, part_bytes
         self._below = _Index(self)  # its own objects load from the index, on demand (CAP-284)
-        self._sending: Any = None  # the proposals of the transaction being committed
+        self._settling: Any = None  # the proposals of the transaction being committed (`Builders.Store._sending`
+        # is another: how deep in sending one below, which this store, the lowest, never does)
         try:
             self.client.put_item(TableName=self.table, Item={**self._item_key(HEAD), "seq": {"N": "0"}, "indexed": {"N": "0"}},
                                  ConditionExpression="attribute_not_exists(#k)", ExpressionAttributeNames={"#k": "key"})
@@ -190,18 +191,18 @@ class Store(Builders.Store):
             raise Conflict(f"{self.table}/{self.store_name}: another store committed first; caught up, run it again") from None
 
     def _settled(self, proposals: Any) -> None:
-        self._sending = proposals
+        self._settling = proposals
         try:
             super()._settled(proposals)
         finally:
-            self._sending = None
+            self._settling = None
 
     def _send(self, plain: Any, expression: Any) -> None:
         """Commits a transaction's changes, and the index items they change, within one DynamoDB transaction, or, where
         they are too many, its entry and its index items first and those items after (CAP-289). The lowest store, it
         records the transaction itself (`Provenance`, its record among the changes), and sends nothing below: its
         expression is not needed."""
-        writes = self._writes(self._sending, self._seq + 1)
+        writes = self._writes(self._settling, self._seq + 1)
         self._commit(plain, writes)
 
     def _catch_up(self) -> int:
