@@ -4,12 +4,11 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mbse-dynamodb"
-version = "0.1.0"
-description = "mbse-schemas>=0.26.17,<0.27"
+version = "0.2.0"
+description = "Stores kept in DynamoDB, their journal the record and no snapshot (mbse-basis CAP-289)."
 requires-python = ">=3.11"
 dependencies = [
-    "mbse-schemas>=0.26.17,<0.27",
-    "mbse-rest>=0.1.0,<0.2",
+    "mbse-schemas>=0.26.21,<0.27",
     "boto3>=1.43.118",
 ]
 
@@ -23,6 +22,7 @@ dev = [
     "httpx2>=2.16",
     "mbse-demo-apps>=0.1.0,<0.2",
     "mbse-journals>=0.2.0,<0.3",
+    "mbse-rest>=0.2.0,<0.3",
     "moto[dynamodb]>=5.2.4",
     "pytest>=9.1.1",
 ]
