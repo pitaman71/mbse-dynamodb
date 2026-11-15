@@ -1,36 +1,97 @@
-"""mbse-rest's persistence cases (`mbse.Services.Rest.PersistenceCases`, mbse-basis CAP-013, the persistence plugin), run
-with this plugin, and mbse-rest's service selecting it by name, as `MBSE_REST_PLUGIN` does."""
+"""mbse-rest's service over the store kept in DynamoDB (mbse-basis CAP-290), DynamoDB mocked by moto: the service's
+store a `Builders.Store` over it, persisting by its journal alone, no snapshot taken or read; and mbse-rest's client, a
+store over the service, stacked on as on any store below."""
 
 from __future__ import annotations
 
-import itertools
+import json
 
 import pytest
 from fastapi.testclient import TestClient
+from mbse.Schemas.Framework import Builders, Changes, Plain
 
-from mbse.Persistence.DynamoDB import Plugin
-from mbse.Services.Rest import PersistenceCases, Service
+from mbse.Persistence.DynamoDB import Store as DynamoDB
+from mbse.Services.Rest import Conformance, Service, Store
 
 from conftest import REGION
+from test_store import add, append, crm, person
 
-_tables = itertools.count()
-
-
-@pytest.mark.parametrize("case", PersistenceCases.CASES, ids=lambda case: case.__name__)
-def test_persistence_case_with_this_plugin(case, aws):
-    """Each case is given a maker of fresh plugins, each over a table of its own in the mocked AWS."""
-    case(lambda: Plugin.Plugin(f"cases-{next(_tables)}", region=REGION))
+TSK_1 = {"singleton": "work.Tasks", "next": {"entry": {"i": "tasks", "o": "directory", "properties": {"id": "TSK-001"},
+                                                       "next": {"target": {}}}}}
 
 
-def test_mbse_rests_service_selects_this_plugin(aws, monkeypatch):
-    """The service as the environment configures it, its plugin this one by name: a first start installs the
-    WorkTracker and snapshots it into DynamoDB, and a restart reads it back. The plugin, made with no arguments, reads
-    its own settings from the process's environment."""
+def transport(api):
+    """mbse-rest's client's transport to the service `api` serves, in this process: no network."""
+    client = TestClient(api)
+
+    def send(method, path, body):
+        response = client.request(method, path, content=body, headers={"content-type": "application/json"})
+        return response.status_code, response.content
+
+    return send
+
+
+def title(client, path):
+    """The title the detail view gives the task at `path`."""
+    store = client.app.state.service.store
+    reference = lambda s: Plain.FromPlain(s)(s.References.OfObject.as_schema(), {"path": path})  # noqa: E731
+    [line] = client.post("/views/detail", json=Conformance._map(store, lambda s: {"x": reference(s)})).text.splitlines()
+    return next(a for a in json.loads(line)["assigns"] if "title" in a["properties"])["properties"]["title"]["str"]
+
+
+def test_the_service_selects_the_store_kept_in_dynamodb(aws, monkeypatch):
+    """The service as the environment configures it, its store below kept in DynamoDB by name: a first start, the table
+    new, installs and seeds the WorkTracker, written to the journal; an edit is written to it; a start again, over the
+    same table, is not seeded again, and reads the edit from the index, on demand. The store, made with no arguments,
+    reads its own settings from the process's environment."""
     monkeypatch.setenv("MBSE_DYNAMODB_TABLE", "demo")
-    environ = {"MBSE_REST_PLUGIN": "mbse.Persistence.DynamoDB.Plugin:Plugin"}
+    monkeypatch.setenv("MBSE_DYNAMODB_REGION", REGION)
+    environ = {"MBSE_REST_STORE": "mbse.Persistence.DynamoDB.Store:Store"}
     first = TestClient(Service.from_environment(environ))
-    assert first.get("/schemas").status_code == 200
-    snapshot, journal = Plugin.Plugin("demo", region=REGION).load()
-    assert snapshot is not None and journal == []
+    below = first.app.state.service.below
+    assert isinstance(below, DynamoDB.Store) and len(list(below.journal())) == 1  # the seed
+    store = first.app.state.service.store
+    body = Conformance._edit(store, lambda s: Plain.FromPlain(s)(s.References.OfObject.as_schema(), {"path": TSK_1}),
+                             {"title": "Kept in DynamoDB"})
+    assert first.post("/views/detail", json=body).status_code == 200
+    assert len(list(below.journal())) == 2
     again = TestClient(Service.from_environment(environ))
-    assert again.get("/schemas").json() == first.get("/schemas").json()
+    assert again.get("/changes").json()["head"] == 0  # not seeded again: the journal holds what it wrote
+    assert title(again, TSK_1) == "Kept in DynamoDB"
+    items = aws.scan(TableName="demo")["Items"]
+    assert {item["key"]["S"][0] for item in items} == {"H", "L", "O", "P"}  # the head, the journal, the index and
+    # an entry's index items kept apart, the seed's being many: no snapshot
+
+
+def test_two_services_over_one_store_kept_in_dynamodb(aws):
+    """Two services, each a process of its own, over one store kept in DynamoDB, and a client of each, an app's store
+    stacked over it: what one app writes reaches the other through the store below's journal, the other service
+    polling it, and its change feed; an append overtaken by another's is refused, as the store below refuses it."""
+    services = []
+    for _ in range(2):
+        kept = DynamoDB.Store("t", store="shared", region=REGION)
+        services.append(Service.app([crm], kept))
+    here, there = (Builders.Store(Store.Store(transport(api))) for api in services)
+    for app in (here, there):
+        app.transaction(crm)
+    add(here, "ada", "bob")
+    seen = []
+    Changes.observe(there, seen.append)
+    assert sorted(e.key.get() for e in there.singleton("crm.TheBook").contacts) == ["ada", "bob"]  # loaded, on demand
+    assert person(there, "ada").name.get() == "ada"
+    with here.transaction():
+        here.crm.Person(person(here, "ada"), lambda p: p.name("Ada"))
+    assert person(there, "ada").name.get() == "ada"  # not yet read
+    assert there._below.poll() == 1 and person(there, "ada").name.get() == "Ada" and len(seen) == 1
+    append(here, "n1", "first")
+    there._below.poll()
+    append(here, "n2", "here's")
+    with pytest.raises(ValueError, match="breaks unique"):
+        with there.transaction():  # after n1, as there saw it, before reading here's n2
+            book = there.singleton("crm.TheBook")
+            last = next(e.note for e in book.last)
+            note = there.crm.Note(lambda n: n.book(lambda a: a.insert(lambda e: e.name("n3").book(book))).text("there's"))
+            there.crm.Book(book, lambda b: b.last(lambda a: a.remove(lambda e: e.note(last)).insert(lambda e: e.note(note))))
+    there._below.poll()
+    assert [e.note.text.get() for e in there.singleton("crm.TheBook").last] == ["here's"]
+    assert len(list(services[0].state.service.below.journal())) == 4  # ada and bob, Ada, n1, n2: n3 refused

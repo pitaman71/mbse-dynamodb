@@ -6,8 +6,6 @@ import boto3
 import pytest
 from moto import mock_aws
 
-from mbse.Persistence.DynamoDB import Plugin
-
 REGION = "us-east-1"
 CREDENTIALS = {"AWS_ACCESS_KEY_ID": "testing", "AWS_SECRET_ACCESS_KEY": "testing", "AWS_SESSION_TOKEN": "testing",
                "AWS_DEFAULT_REGION": REGION, "AWS_REGION": REGION}
@@ -35,9 +33,4 @@ def module_aws():
             patch.delenv(f"MBSE_DYNAMODB_{name}", raising=False)
         with mock_aws():
             yield boto3.client("dynamodb", region_name=REGION)
-
-
-@pytest.fixture
-def plugin(aws):
-    return Plugin.Plugin("mbse-test", region=REGION)
 

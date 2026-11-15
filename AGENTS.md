@@ -1,9 +1,9 @@
 # Guide for AI agents
 
 mbse-schemas stores kept in DynamoDB: a store kept in DynamoDB, below a lazy `Builders.Store`, its journal the record
-and an index from which it reads one object, no snapshot (mbse-basis [FEA-006: persistence](https://github.com/pitaman71/mbse-basis/blob/main/docs/features/FEA-006.md), [CAP-289: journals kept in DynamoDB](https://github.com/pitaman71/mbse-basis/blob/main/docs/capabilities/README.md#CAP-289)); and
-mbse-rest's persistence plugin, which it supersedes, journaled with occasional snapshots ([CAP-013: an in-memory store journaled to DynamoDB](https://github.com/pitaman71/mbse-basis/blob/main/docs/capabilities/CAP-013.md)). Python, in
-`python3/mbse/Persistence/DynamoDB` (`mbse.Persistence.DynamoDB`).
+and an index from which it reads one object, no snapshot (mbse-basis [FEA-006: persistence](https://github.com/pitaman71/mbse-basis/blob/main/docs/features/FEA-006.md), [CAP-289: journals kept in DynamoDB](https://github.com/pitaman71/mbse-basis/blob/main/docs/capabilities/README.md#CAP-289)), which
+mbse-rest's service serves a store over ([CAP-290: a service's store stacked, with no snapshot](https://github.com/pitaman71/mbse-basis/blob/main/docs/capabilities/README.md#CAP-290)). Python, in `python3/mbse/Persistence/DynamoDB`
+(`mbse.Persistence.DynamoDB`).
 
 ## Read before any work
 
@@ -30,12 +30,10 @@ directory that holds `mbse/`; npm: the package's directory), where the package s
 
 - `mbse/Persistence/DynamoDB/Store.py` is the store kept in DynamoDB, a `Builders.Store` subclass whose store below is
   its own index: how the table holds it is its module docstring.
-- `mbse/Persistence/DynamoDB/Plugin.py` implements mbse-rest's persistence plugin protocol,
-  `mbse.Services.Rest.Persistence.Plugin` (`load`, `journal`, `snapshot`), kept until mbse-rest's service is stacked
-  over `Store` ([CAP-290: a service's store stacked, with no snapshot](https://github.com/pitaman71/mbse-basis/blob/main/docs/capabilities/README.md#CAP-290)).
-- `mbse/Persistence/DynamoDB/Table.py` holds the settings (`MBSE_DYNAMODB_*`) and the table both use.
+- `mbse/Persistence/DynamoDB/Table.py` holds the settings (`MBSE_DYNAMODB_*`) and the table.
 - `tests/test_below.py` and `tests/test_journals.py` run siblings' notebook suites, mbse-schemas' BLW and
-  mbse-journals' JRN, from their checkouts, case by case (`tests/notebooks.py`).
+  mbse-journals' JRN, from their checkouts, case by case (`tests/notebooks.py`); `tests/test_rest.py` runs mbse-rest's
+  service over the store.
 
 ## Commands
 

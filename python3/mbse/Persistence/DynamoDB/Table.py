@@ -1,5 +1,5 @@
-"""The DynamoDB table a store is kept in, and the settings that name it, shared by `Store` and the `Plugin` it
-supersedes ([CAP-289: journals kept in DynamoDB](mbse:mbse-basis/docs/capabilities/README.md#CAP-289)).
+"""The DynamoDB table a store is kept in, and the settings that name it
+([CAP-289: journals kept in DynamoDB](mbse:mbse-basis/docs/capabilities/README.md#CAP-289)).
 
 A table holds any number of stores, each under its own partition key (`store`), its items sorted by `key`."""
 

@@ -782,11 +782,10 @@ dev = [{ name = "pytest", specifier = ">=9.1.1" }]
 
 [[package]]
 name = "mbse-dynamodb"
-version = "0.1.0"
+version = "0.2.0"
 source = { editable = "." }
 dependencies = [
     { name = "boto3" },
-    { name = "mbse-rest" },
     { name = "mbse-schemas" },
 ]
 
@@ -796,6 +795,7 @@ dev = [
     { name = "httpx2" },
     { name = "mbse-demo-apps" },
     { name = "mbse-journals" },
+    { name = "mbse-rest" },
     { name = "moto", extra = ["dynamodb"] },
     { name = "pytest" },
 ]
@@ -803,7 +803,6 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "boto3", specifier = ">=1.43.118" },
-    { name = "mbse-rest", editable = "../../mbse-rest/python3" },
     { name = "mbse-schemas", editable = "../../mbse-schemas/python3" },
 ]
 
@@ -813,6 +812,7 @@ dev = [
     { name = "httpx2", specifier = ">=2.16" },
     { name = "mbse-demo-apps", editable = "../../mbse-demo-apps/python3" },
     { name = "mbse-journals", editable = "../../mbse-journals/python3" },
+    { name = "mbse-rest", editable = "../../mbse-rest/python3" },
     { name = "moto", extras = ["dynamodb"], specifier = ">=5.2.4" },
     { name = "pytest", specifier = ">=9.1.1" },
 ]
@@ -839,7 +839,7 @@ dev = [
 
 [[package]]
 name = "mbse-rest"
-version = "0.1.0"
+version = "0.2.0"
 source = { editable = "../../mbse-rest/python3" }
 dependencies = [
     { name = "fastapi" },
@@ -858,6 +858,7 @@ requires-dist = [
 dev = [
     { name = "httpx2", specifier = ">=2.16" },
     { name = "mbse-demo-apps", editable = "../../mbse-demo-apps/python3" },
+    { name = "mbse-journals", editable = "../../mbse-journals/python3" },
     { name = "pytest", specifier = ">=9.1.1" },
 ]
 

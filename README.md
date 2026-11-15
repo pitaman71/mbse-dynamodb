@@ -18,6 +18,10 @@ It depends on [mbse-schemas](https://github.com/pitaman71/mbse-schemas), and for
 [mbse-demo-apps](https://github.com/pitaman71/mbse-demo-apps)' WorkTracker, each a checkout beside this repository
 pinned in `siblings.json`.
 
+mbse-rest's service serves a store over one kept in DynamoDB, as the store below it
+([CAP-290: a service's store stacked, with no snapshot](https://github.com/pitaman71/mbse-basis/blob/main/docs/capabilities/README.md#CAP-290)), selected by `MBSE_REST_STORE=mbse.Persistence.DynamoDB.Store:Store`, the store
+made with no arguments, its settings from `MBSE_DYNAMODB_*`.
+
 ## Using it
 
 ```python
@@ -40,11 +44,6 @@ refuses it; one written in a `with kept.transaction():` block raises `Store.Conf
 table is made if absent (`create=False`, or `MBSE_DYNAMODB_CREATE=0`, not to); several stores share one table, each
 under its own `store` name. How the table holds the journal, the index and the head is `Store`'s module docstring.
 
-`Plugin`, mbse-rest's persistence plugin, journaled with occasional snapshots, is superseded by `Store`, and kept
-while mbse-rest's service persists through it ([CAP-290: a service's store stacked, with no snapshot](https://github.com/pitaman71/mbse-basis/blob/main/docs/capabilities/README.md#CAP-290)): mbse-rest's service selects it
-by `MBSE_REST_PLUGIN=mbse.Persistence.DynamoDB.Plugin:Plugin`, and its table, store and snapshots are as
-[CAP-013: an in-memory store journaled to DynamoDB](https://github.com/pitaman71/mbse-basis/blob/main/docs/capabilities/CAP-013.md#the-dynamodb-plugin-its-table) built them.
-
 ## Testing it
 
 ```sh
@@ -53,7 +52,7 @@ cd python3 && uv sync && uv run coverage run -m pytest && uv run coverage report
 
 The tests need no AWS account: DynamoDB is mocked by moto. Besides the store's own cases, they run mbse-schemas'
 suite BLW with a store kept in DynamoDB as the store below, and mbse-journals' suite JRN unchanged with each of its
-journals kept in DynamoDB, both from the sibling checkouts; and the plugin's cases and mbse-rest's persistence cases.
+journals kept in DynamoDB, both from the sibling checkouts; and mbse-rest's service over a store kept in DynamoDB.
 With DynamoDB Local running, also run the tests against it:
 
 ```sh
