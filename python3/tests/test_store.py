@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import pytest
 from botocore.exceptions import ClientError
-from mbse.Schemas.Framework import JSON, Builders, Changes, Plain
+from mbse.Schemas.Framework import JSON, Builders, Changes, Plain, References
 
 from mbse.Persistence.DynamoDB import Store as DynamoDB
 
@@ -460,3 +460,31 @@ def test_the_table_made_meanwhile_by_another(aws):
         ClientError({"Error": {"Code": "LimitExceededException", "Message": "too many"}}, "CreateTable"))
     with pytest.raises(ClientError, match="too many"):
         Table.create_table(aws, "another")
+
+
+def provenanced(s):
+    """`s`, Provenance installed, and crm.Person recorded as modified by each transaction."""
+    from mbse.Schemas.Framework import Provenance
+
+    s.transaction(Provenance.install)
+    s.transaction(lambda t: Provenance.extend(t, [t.crm.Person]))
+    return s
+
+
+def recorded(s):
+    return [str(e.uid) for e in s.singleton("Provenance.Transactions").transactions]
+
+
+def test_a_transaction_is_recorded_once_in_the_store_kept_in_dynamodb(aws):
+    """mbse-schemas' Provenance: the store kept in DynamoDB, the lowest, records each transaction, the `uid` its
+    expression gives where it gives one; a store above records none, its record reaching it as the store below's
+    writes do, and another process reading it from the table."""
+    kept = provenanced(store())
+    app = provenanced(above(kept))
+    assert getattr(kept._below, "records", False) is False and app._below.records is True
+    (ada,) = add(app, "ada")  # a block: no expression, no uid given
+    app.transaction(app.Mutations.OfTransaction(lambda t: t.uid("w1").mutations([lambda mu: mu.upsert(lambda u: u.exists(
+        [lambda p: p.symbols({"p": References.of(app, ada)}).spec([lambda _: _.p.name("Ada")])]))])))
+    (first, second) = recorded(kept)
+    assert second == "w1" and recorded(app) == [first, "w1"]
+    assert recorded(provenanced(store())) == [first, "w1"]

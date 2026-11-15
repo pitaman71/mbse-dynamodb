@@ -94,7 +94,8 @@ def _object_key(path: Any) -> str:
 
 
 class _Index:
-    """The index, as the store below the DynamoDB store's own proxies: it gives an object's document."""
+    """The index, as the store below the DynamoDB store's own proxies: it gives an object's document. It has no
+    `records`: the DynamoDB store, the lowest, records each transaction (`Builders.Store.records`)."""
 
     def __init__(self, store: Store) -> None:
         self.store = store
@@ -195,9 +196,11 @@ class Store(Builders.Store):
         finally:
             self._sending = None
 
-    def _send(self, plain: Any) -> None:
+    def _send(self, plain: Any, expression: Any) -> None:
         """Commits a transaction's changes, and the index items they change, within one DynamoDB transaction, or, where
-        they are too many, its entry and its index items first and those items after (CAP-289)."""
+        they are too many, its entry and its index items first and those items after (CAP-289). The lowest store, it
+        records the transaction itself (`Provenance`, its record among the changes), and sends nothing below: its
+        expression is not needed."""
         writes = self._writes(self._sending, self._seq + 1)
         self._commit(plain, writes)
 
