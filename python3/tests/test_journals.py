@@ -1,11 +1,8 @@
 """mbse-journals' suite JRN (`tests/03_Journals.ipynb`, the journal conformance every backend passes unchanged,
 mbse-basis CAP-288), run unchanged with each journal kept in DynamoDB (CAP-289): every store the suite makes,
 `Builders.Store()`, is made over a store kept in DynamoDB of its own, `Builders.Store(Store(...))`, as an app stacks
-one.
-
-A store above does not send its schema installs below, since a transaction that writes only schemas reports no changes
-(`Changes.observe`): a store below is given its schemas apart, as an app gives its stores theirs. So that the suite runs
-unchanged, the store made in its place installs into the store below it each install it is given, before itself.
+one. An install the suite runs in it is run by the store kept in DynamoDB first, as any store below runs the installs of
+the store over it (`Stores.Below.install`, CAP-306).
 """
 
 from __future__ import annotations
@@ -26,15 +23,10 @@ InMemory = Builders.Store
 
 
 class Stacked(InMemory):
-    """`Builders.Store()`, made over a store kept in DynamoDB, of its own."""
+    """`Builders.Store()`, made over a store kept in DynamoDB, of its own: a test's stand-in, which adds nothing."""
 
     def __init__(self, below=None):
         super().__init__(below if below is not None else Store("jrn", store=f"jrn-{next(_stores)}", region=REGION))
-
-    def transaction(self, spec=None):
-        if Builders._is_function(spec):  # an install: the store below's schemas first
-            self._below.transaction(spec)
-        return super().transaction(spec)
 
 
 @pytest.fixture(scope="module")

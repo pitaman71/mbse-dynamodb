@@ -4,9 +4,11 @@ own; what its followers are given; and what it keeps in the table, which is no s
 
 from __future__ import annotations
 
+import json
+
 import pytest
 from botocore.exceptions import ClientError
-from mbse.Schemas.Framework import JSON, Builders, Changes, Plain, References
+from mbse.Schemas.Framework import JSON, Builders, References, Stores
 
 from mbse.Persistence.DynamoDB import Store as DynamoDB
 
@@ -65,18 +67,21 @@ def contact(key):
                                                            "next": {"target": {}}}}}
 
 
-def store(name="s", **options):
-    """A store kept in DynamoDB, its schemas installed: one process's."""
-    made = DynamoDB.Store("t", store=name, region=REGION, **options)
-    made.transaction(crm)
-    return made
+def process(name="s", **options):
+    """A store kept in DynamoDB: one process's."""
+    return DynamoDB.Store("t", store=name, region=REGION, **options)
 
 
 def above(below):
-    """A store over it, as an app holds one."""
+    """A store over it, as an app holds one, its schemas installed, which it runs in the store below first."""
     made = Builders.Store(below)
     made.transaction(crm)
     return made
+
+
+def store(name="s", **options):
+    """An app's store over one process's store kept in DynamoDB."""
+    return above(process(name, **options))
 
 
 def add(s, *keys):
@@ -133,28 +138,29 @@ def keys(aws, name="s"):
 def test_documents_as_the_store_in_memory_gives_them(aws):
     """Each object's document, read from the index one object at a time, is the one the store in memory gives after
     the same transactions: properties, value objects, entries in each named adjacency, equal entries of an open
-    relation each kept, a removed entry gone, a deleted object gone with each entry linking it."""
-    memory, kept = Builders.Store(), store()
+    relation each kept, a removed entry gone, a deleted object gone with each entry linking it. A process that reads
+    it needs no schemas: the index holds documents."""
+    memory, kept = Builders.Store(), process()
     memory.transaction(crm)
     write(memory)
-    write(kept)
+    write(above(kept))
+    assert isinstance(kept, Stores.Below) and not isinstance(kept, Builders.Store)
     assert documents(kept) == documents(memory)
     assert kept.document(contact("cy")) is None and kept.document({"singleton": "crm.Nobody", "next": {"target": {}}}) is None
-    restarted = DynamoDB.Store("t", store="s", region=REGION)  # another process, which installs as an app does
-    restarted.transaction(crm)
-    assert documents(restarted) == documents(memory)
+    assert documents(process()) == documents(memory)  # another process, given no installs
 
 
 def test_a_store_above_loads_one_object_at_a_time_and_writes_through(aws):
-    kept = store()
-    write(kept)
-    app = above(DynamoDB.Store("t", store="s", region=REGION, environ={"MBSE_DYNAMODB_CREATE": "0"}))
-    app._below.transaction(crm)
+    write(store())
+    kept = DynamoDB.Store("t", store="s", region=REGION, environ={"MBSE_DYNAMODB_CREATE": "0"})
+    read, document = [], kept.document
+    kept.document = lambda path: (read.append(path), document(path))[1]
+    app = above(kept)
     ada = person(app, "ada")
-    assert (ada.name.get(), ada.home.city.get(), len(app._loaded)) == ("Ada", "Rome", 2)
+    assert (ada.name.get(), ada.home.city.get(), len(read)) == ("Ada", "Rome", 2)  # the book, then ada
     with app.transaction():
         app.crm.Person(ada, lambda p: p.name("Ada L."))
-    fresh = above(store())
+    fresh = store()
     assert person(fresh, "ada").name.get() == "Ada L."
     assert sorted(e.key.get() for e in fresh.singleton("crm.TheBook").contacts) == ["ada", "bob", "dee"]
 
@@ -162,33 +168,36 @@ def test_a_store_above_loads_one_object_at_a_time_and_writes_through(aws):
 def test_the_table_holds_a_journal_and_an_index_and_no_snapshot(aws):
     """The journal, entries 1 to n in commit order, each the changes as mbse-schemas writes them; the index, by object;
     the head. Nothing else: a schema install writes nothing, and nothing is ever a snapshot of the store."""
-    kept = store()
+    kept = process()
+    app = above(kept)
     assert keys(aws) == ["H"]
     effects = []
-    Changes.observe(kept, lambda effect: effects.append(json_of(kept, effect)))
-    write(kept)
+    kept.follow(effects.append)
+    end = kept.follow(effects.append)
+    end()
+    end()
+    write(app)
     found = keys(aws)
     assert {key[0] for key in found} == {"H", "L", "O"}
     journal = list(kept.journal())
     assert journal == effects and len(journal) == 7
     assert list(kept.journal(after=5)) == effects[5:]
-
-
-def json_of(s, effect):
-    return JSON.loads(JSON.dumps(Plain.ToPlain(s).Transaction(effect)))
+    same = {"mutations": [{"upsert": {"exists": [{"symbols": {"x": {"reference": {"path": contact("ada")}}}, "spec": [
+        {"x": [{"as_property": {"name": "name", "mutations": [{"set": {"value": "Ada"}}]}}]}]}]}}]}
+    assert kept.commit(same) is None and len(list(kept.journal())) == 7  # it changed nothing: nothing committed
 
 
 def test_others_commits_reach_followers_in_commit_order(aws):
     """Two processes over one partition: what one commits, the other's followers are given whole, as committed, in
-    commit order, when it catches up; its own objects, and a store above it, are changed where they are present."""
-    one, two = store(), store()
-    add(one, "ada", "bob")
+    commit order, when it catches up; a store above it is changed where its objects are present."""
+    one, two = process(), process()
+    first = above(one)
+    add(first, "ada", "bob")
     app = above(two)
     two.poll()
     ada = person(app, "ada")
     given = []
-    Changes.observe(two, lambda effect: given.append(json_of(two, effect)))
-    first = above(one)
+    two.follow(given.append)
     with first.transaction():
         first.crm.Person(person(first, "ada"), lambda p: p.name("Ada"))
     with first.transaction():
@@ -203,7 +212,7 @@ def test_two_writers_appending_after_one_last(aws):
     """Two processes, each appending after the last it saw: the second's removal of that last removes nothing, and its
     insertion breaks the clause that keeps one last, so that it is refused, as mbse-schemas refuses it in every store
     (CAP-293); its store above then holds what the first wrote."""
-    one, two = store(), store()
+    one, two = process(), process()
     first, second = above(one), above(two)
     append(first, "n1", "first")
     assert [e.note.text.get() for e in second.singleton("crm.TheBook").last] == ["first"]
@@ -227,48 +236,37 @@ def overtaking(s, other):
 
 def test_a_writer_overtaken_at_its_commit_interprets_again(aws):
     """Where another commits between a store's catching up and its commit, DynamoDB refuses its commit on the head's
-    condition; it catches up and interprets the transaction again, and both are kept, in the order DynamoDB gave."""
-    one, two = store(), store()
-    add(one, "ada")
-    first, second = above(one), above(two)
+    condition; it catches up and interprets the transaction again, and both are kept, in the order DynamoDB gave. A
+    transaction written in a `with` block above is given as plain data, so that it too is interpreted again."""
+    one, two = process(), process()
+    first = above(one)
+    add(first, "ada")
+    second = above(two)
     overtaking(two, lambda: add(first, "bob"))
-    add(second, "cy")
+    add(second, "cy")  # a block
     assert [e.key.get() for e in second.singleton("crm.TheBook").contacts] == ["ada", "cy", "bob"]  # its own first
-    assert [len(list(one.journal())), len(list(two.journal()))] == [3, 3]
-    assert store().document(contact("bob")) is not None
-    with pytest.raises(LookupError, match="install its schemas"):
-        DynamoDB.Store("t", store="s", region=REGION).document(contact("bob"))
+    assert [len(list(one.journal())), len(list(two.journal())), two._seq] == [3, 3, 3]
+    assert process().document(contact("bob")) is not None
+    assert [e.key.get() for e in store().singleton("crm.TheBook").contacts] == ["ada", "bob", "cy"]
 
 
 def test_a_writer_overtaken_again_and_again_gives_up(aws):
-    one, two = store(), store(attempts=1)
+    one, two = process(), process(attempts=1)
     first = above(one)
     overtaking(two, lambda: add(first, "bob"))
     with pytest.raises(DynamoDB.Conflict, match="1 times running"):
         add(above(two), "cy")
 
 
-def test_a_block_overtaken_raises_conflict_caught_up(aws):
-    """A transaction written in a `with` block cannot be run again by the store: overtaken, it raises `Conflict`,
-    caught up, and running it again commits it."""
-    one, two = store(), store()
-    first = above(one)
-    overtaking(two, lambda: add(first, "bob"))
-    with pytest.raises(DynamoDB.Conflict, match="run it again"):
-        add(two, "cy")
-    assert two._seq == len(list(one.journal()))
-    add(two, "cy")
-    assert [e.key.get() for e in above(one).singleton("crm.TheBook").contacts] == ["bob", "cy"]
-
-
 def test_index_items_too_many_for_one_transaction_written_out_after(aws):
     """A transaction whose index items are more than one DynamoDB transaction writes beside its entry: its entry and
     its index items, kept apart, are committed first, then written out; a store that reads meanwhile writes them out
     first, as one does where the writer stopped before it did."""
-    memory, kept = Builders.Store(), store(max_actions=6)
+    memory, kept = Builders.Store(), process(max_actions=6)
     memory.transaction(crm)
+    app = above(kept)
     write(memory)
-    write(kept)
+    write(app)
     assert documents(kept) == documents(memory)
     assert any(key.startswith("P#") for key in keys(aws))
     batch = kept.client.batch_write_item
@@ -277,11 +275,10 @@ def test_index_items_too_many_for_one_transaction_written_out_after(aws):
         kept.client.batch_write_item = batch
         raise ClientError({"Error": {"Code": "InternalServerError", "Message": "stopped"}}, "BatchWriteItem")
     kept.client.batch_write_item = stopped
-    add(kept, "eve", "fay")
+    add(app, "eve", "fay")
     head = aws.get_item(TableName="t", Key={"store": {"S": "s"}, "key": {"S": "H"}})["Item"]
     assert int(head["indexed"]["N"]) == int(head["seq"]["N"]) - 1
-    reader = DynamoDB.Store("t", store="s", region=REGION)
-    reader.transaction(crm)
+    reader = process()
     assert JSON.loads(JSON.dumps(reader.document(contact("fay"))))["mutations"][0]["upsert"]["exists"][0]["spec"][0][
         "0"][0] == {"as_property": {"name": "name", "mutations": [{"set": {"value": "fay"}}]}}
     head = aws.get_item(TableName="t", Key={"store": {"S": "s"}, "key": {"S": "H"}})["Item"]
@@ -290,42 +287,45 @@ def test_index_items_too_many_for_one_transaction_written_out_after(aws):
 
 def test_index_items_written_out_by_two_at_once(aws):
     """Two stores writing out the same index items: the second's moving `indexed` finds it moved already."""
-    kept = store(max_actions=4)
+    kept = process(max_actions=4)
     batch = kept.client.batch_write_item
 
     def stopped(**request):
         kept.client.batch_write_item = batch
         raise ClientError({"Error": {"Code": "InternalServerError", "Message": "stopped"}}, "BatchWriteItem")
     kept.client.batch_write_item = stopped
-    add(kept, "ada")
+    add(above(kept), "ada")
     number = kept._seq
-    reader = store()
+    reader = process()
     reader._write_out(number)  # as a reader that read the head before another wrote them out
     reader._write_out(number)
     assert reader.document(contact("ada")) is not None
 
 
-def test_a_journal_entry_in_parts(aws):
-    kept = store(part_bytes=100)
-    add(kept, *(f"person-{n}" for n in range(5)))
+def test_a_journal_entry_and_a_document_in_parts(aws):
+    kept = process(part_bytes=400)
+    add(above(kept), *(f"person-{n}" for n in range(5)))
     assert len([key for key in keys(aws) if key.startswith("L#")]) > 5
-    assert list(kept.journal()) == list(store().journal())
+    assert len([key for key in keys(aws) if key.startswith(DynamoDB._object_key(BOOK) + "D#")]) > 5
+    assert list(kept.journal()) == list(process().journal())
     assert len(list(kept.journal())) == 1
+    assert JSON.dumps(kept.document(contact("person-3"))) == JSON.dumps(above(process()).document(contact("person-3")))
 
 
 def test_more_than_one_dynamodb_transaction_writes_is_refused(aws):
-    kept = store(max_bytes=500)
+    kept = process(max_bytes=500)
     with pytest.raises(ValueError, match="more than one DynamoDB transaction writes"):
-        add(kept, "ada")
+        add(above(kept), "ada")
     assert list(kept.journal()) == [] and keys(aws) == ["H"]
 
 
 def test_a_counted_object_linked_is_kept_and_its_document_refused(aws):
-    """A counted object has no path: an entry linking it is kept under the objects it links that have one, and a
-    document of one of them is refused, as the store in memory refuses it."""
-    memory, kept = Builders.Store(), store()
+    """A counted object has no path: a document of an object that links one is refused, as the store in memory refuses
+    it, and its deletion leaves nothing of it."""
+    memory, kept = Builders.Store(), process()
     memory.transaction(crm)
-    for s in (memory, kept):
+    app = above(kept)
+    for s in (memory, app):
         (ada,) = add(s, "ada")
         with s.transaction():
             s.crm.Person(ada, lambda p: p.tags(lambda a: a.insert(lambda e: e.tag(s.crm.Tag(lambda t: t.label("vip"))))))
@@ -334,14 +334,15 @@ def test_a_counted_object_linked_is_kept_and_its_document_refused(aws):
     with pytest.raises(ValueError) as in_dynamodb:
         kept.document(contact("ada"))
     assert str(in_dynamodb.value) == str(in_memory.value)
-    with kept.transaction():  # a tagged person deleted: its entries go, the tag held by none
-        kept.crm.Book(kept.singleton("crm.TheBook"), lambda b: b.contacts(lambda a: a.remove(lambda e: e.key("ada"))))
+    with app.transaction():  # a tagged person deleted: its entries go, the tag held by none
+        app.crm.Book(app.singleton("crm.TheBook"), lambda b: b.contacts(lambda a: a.remove(lambda e: e.key("ada"))))
     book = DynamoDB._object_key(BOOK)
-    assert [key for key in keys(aws) if key.startswith("O#")] == [book + "V"]  # the book's alone, no entry left
+    assert [key for key in keys(aws) if key.startswith("O#")] == [book + "D#000000"]  # the book's alone, no entry left
 
 
 def test_a_failure_of_dynamodb_is_raised(aws):
-    kept = store()
+    kept = process()
+    app = above(kept)
     transact = kept.client.transact_write_items
 
     def failing(**request):
@@ -349,7 +350,7 @@ def test_a_failure_of_dynamodb_is_raised(aws):
         raise ClientError({"Error": {"Code": "ValidationException", "Message": "too large"}}, "TransactWriteItems")
     kept.client.transact_write_items = failing
     with pytest.raises(ClientError, match="too large"):
-        add(kept, "ada")
+        add(app, "ada")
     put = kept.client.put_item
 
     def refused(**request):
@@ -362,11 +363,11 @@ def test_a_failure_of_dynamodb_is_raised(aws):
 
     def lost(**request):
         raise ClientError({"Error": {"Code": "InternalServerError", "Message": "lost"}}, "UpdateItem")
-    other = store("other", max_actions=4)
+    other = process("other", max_actions=4)
     other.client.update_item = lost
-    add(other, "ada")  # committed; its index items written out, `indexed` not moved
+    add(above(other), "ada")  # committed; its index items written out, `indexed` not moved
     other.client.update_item = update
-    assert store("other").document(contact("ada")) is not None
+    assert process("other").document(contact("ada")) is not None
 
 
 def test_configured_by_the_environment(aws):
@@ -379,15 +380,15 @@ def test_configured_by_the_environment(aws):
 
 def test_a_deletion_reaches_what_its_store_never_loaded(aws):
     """A store that deletes an object it never loaded removes, from the index, the object, what it owns, in cascade,
-    and every entry linking either, under every object they link, loaded or not, as the store in memory does."""
-    memory, one = Builders.Store(), store()
+    and every entry linking either, from every document that held one, loaded or not, as the store in memory does."""
+    memory, one = Builders.Store(), process()
     memory.transaction(crm)
-    for s in (memory, one):
+    for s in (memory, above(one)):
         ada, bob = add(s, "ada", "bob")
         with s.transaction():
             s.crm.Person(ada, lambda p: p.knows(lambda a: a.insert(lambda e: e.known(bob))))
             s.crm.Pet(lambda p: p.keeper(lambda a: a.insert(lambda e: e.name("rex").keeper(bob))).kind("dog"))
-    app = above(store())  # another process: nothing loaded
+    app = store()  # another process: nothing loaded
     for s in (memory, app):
         with s.transaction():
             s.crm.Book(s.singleton("crm.TheBook"), lambda b: b.contacts(lambda a: a.remove(lambda e: e.key("bob"))))
@@ -395,21 +396,23 @@ def test_a_deletion_reaches_what_its_store_never_loaded(aws):
     rex = {"singleton": "crm.TheBook", "next": {"entry": {"i": "contacts", "o": "book", "properties": {"key": "bob"},
            "next": {"entry": {"i": "pets", "o": "keeper", "properties": {"name": "rex"}, "next": {"target": {}}}}}}}
     assert one.document(rex) is None and memory.document(rex) is None
-    assert len([key for key in keys(aws) if key.startswith("O#")]) == 4  # the book and ada, her owning entry under each
+    assert len([key for key in keys(aws) if key.startswith("O#")]) == 4  # the book's and ada's documents, and each
+    # linking the other
 
 
 def test_a_read_overtaken_by_a_commit_reads_again(aws):
     """Another store's commit between reading an object's items and reading the head again: the object is read again,
     so that a document is of one entry of the journal."""
-    one, two = store(), store()
-    add(one, "ada")
+    one, two = process(), process()
+    first = above(one)
+    add(first, "ada")
     query = two.client.query
 
     def overtaken(**request):
         two.client.query = query
         found = query(**request)
-        with one.transaction():
-            one.crm.Person(person(one, "ada"), lambda p: p.name("Ada"))
+        with first.transaction():
+            first.crm.Person(person(first, "ada"), lambda p: p.name("Ada"))
         return found
     two.client.query = overtaken
     assert JSON.dumps(two.document(contact("ada"))) == JSON.dumps(one.document(contact("ada")))
@@ -418,15 +421,15 @@ def test_a_read_overtaken_by_a_commit_reads_again(aws):
 
 def test_read_in_pages(aws):
     """DynamoDB gives a query's items in pages: each is read."""
-    kept = store(part_bytes=50)
-    add(kept, "ada", "bob")
+    kept = process(part_bytes=50)
+    add(above(kept), "ada", "bob")
     query = kept.client.query
     kept.client.query = lambda **request: query(**request, Limit=1)
-    assert documents(kept) == documents(store()) and len(list(kept.journal())) == 1
+    assert documents(kept) == documents(process()) and len(list(kept.journal())) == 1
 
 
 def test_index_items_left_unprocessed_are_written_again(aws):
-    kept = store(max_actions=4)
+    kept = process(max_actions=4)
     batch = kept.client.batch_write_item
 
     def some_left(**request):
@@ -434,8 +437,8 @@ def test_index_items_left_unprocessed_are_written_again(aws):
         done = batch(RequestItems={kept.table: requests[:1]})
         return {**done, "UnprocessedItems": {kept.table: requests[1:]} if requests[1:] else {}}
     kept.client.batch_write_item = some_left
-    add(kept, "ada", "bob")
-    assert documents(kept) == documents(store())
+    add(above(kept), "ada", "bob")
+    assert documents(kept) == documents(process())
 
 
 def test_the_table_made_meanwhile_by_another(aws):
@@ -479,12 +482,19 @@ def test_a_transaction_is_recorded_once_in_the_store_kept_in_dynamodb(aws):
     """mbse-schemas' Provenance: the store kept in DynamoDB, the lowest, records each transaction, the `uid` its
     expression gives where it gives one; a store above records none, its record reaching it as the store below's
     writes do, and another process reading it from the table."""
-    kept = provenanced(store())
+    kept = process()
     app = provenanced(above(kept))
-    assert getattr(kept._below, "records", False) is False and app._below.records is True
+    assert kept.records is True
     (ada,) = add(app, "ada")  # a block: no expression, no uid given
     app.transaction(app.Mutations.OfTransaction(lambda t: t.uid("w1").mutations([lambda mu: mu.upsert(lambda u: u.exists(
         [lambda p: p.symbols({"p": References.of(app, ada)}).spec([lambda _: _.p.name("Ada")])]))])))
-    (first, second) = recorded(kept)
-    assert second == "w1" and recorded(app) == [first, "w1"]
+    (first, second) = recorded(app)
+    assert second == "w1" and len(list(kept.journal())) == 2
+    assert all("Provenance" in JSON.dumps(entry) for entry in kept.journal())
     assert recorded(provenanced(store())) == [first, "w1"]
+    with app.transaction():  # ada deleted: the records that linked her, which no store loaded, link her no longer
+        app.crm.Book(app.singleton("crm.TheBook"), lambda b: b.contacts(lambda a: a.remove(lambda e: e.key("ada"))))
+    linked = [json.loads(item["data"]["S"])["links"] for item in aws.scan(TableName="t")["Items"]
+              if "#D#" in item["key"]["S"]]
+    assert linked and all(path != contact("ada") for links in linked for path in links)
+    assert process().document(contact("ada")) is None and len(recorded(provenanced(store()))) == 3

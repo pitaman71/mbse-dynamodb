@@ -71,7 +71,8 @@ def test_two_services_over_one_store_kept_in_dynamodb(aws):
     for _ in range(2):
         kept = DynamoDB.Store("t", store="shared", region=REGION)
         services.append(Service.app([crm], kept))
-    here, there = (Builders.Store(Store.Store(transport(api))) for api in services)
+    remotes = [Store.Remote(transport(api)) for api in services]
+    here, there = (Builders.Store(remote) for remote in remotes)
     for app in (here, there):
         app.transaction(crm)
     add(here, "ada", "bob")
@@ -82,9 +83,9 @@ def test_two_services_over_one_store_kept_in_dynamodb(aws):
     with here.transaction():
         here.crm.Person(person(here, "ada"), lambda p: p.name("Ada"))
     assert person(there, "ada").name.get() == "ada"  # not yet read
-    assert there._below.poll() == 1 and person(there, "ada").name.get() == "Ada" and len(seen) == 1
+    assert remotes[1].poll() == 1 and person(there, "ada").name.get() == "Ada" and len(seen) == 1
     append(here, "n1", "first")
-    there._below.poll()
+    remotes[1].poll()
     append(here, "n2", "here's")
     with pytest.raises(ValueError, match="breaks unique"):
         with there.transaction():  # after n1, as there saw it, before reading here's n2
@@ -92,6 +93,6 @@ def test_two_services_over_one_store_kept_in_dynamodb(aws):
             last = next(e.note for e in book.last)
             note = there.crm.Note(lambda n: n.book(lambda a: a.insert(lambda e: e.name("n3").book(book))).text("there's"))
             there.crm.Book(book, lambda b: b.last(lambda a: a.remove(lambda e: e.note(last)).insert(lambda e: e.note(note))))
-    there._below.poll()
+    remotes[1].poll()
     assert [e.note.text.get() for e in there.singleton("crm.TheBook").last] == ["here's"]
     assert len(list(services[0].state.service.below.journal())) == 4  # ada and bob, Ada, n1, n2: n3 refused

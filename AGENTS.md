@@ -28,8 +28,10 @@ directory that holds `mbse/`; npm: the package's directory), where the package s
 
 ## This repository
 
-- `mbse/Persistence/DynamoDB/Store.py` is the store kept in DynamoDB, a `Builders.Store` subclass whose store below is
-  its own index: how the table holds it is its module docstring.
+- `mbse/Persistence/DynamoDB/Store.py` is the store kept in DynamoDB, a store below (mbse-schemas' `Stores.Below`),
+  which interprets each transaction in a `Builders.Store` of its own over its index: how the table holds it is its
+  module docstring. It uses mbse-schemas' public interface alone: no private name of it, nor a subclass overriding one
+  (mbse-basis [CAP-306: a public store-below interface](https://github.com/pitaman71/mbse-basis/blob/main/docs/capabilities/README.md#CAP-306)).
 - `mbse/Persistence/DynamoDB/Table.py` holds the settings (`MBSE_DYNAMODB_*`) and the table.
 - `tests/test_below.py` and `tests/test_journals.py` run siblings' notebook suites, mbse-schemas' BLW and
   mbse-journals' JRN, from their checkouts, case by case (`tests/notebooks.py`); `tests/test_rest.py` runs mbse-rest's

@@ -26,23 +26,24 @@ made with no arguments, its settings from `MBSE_DYNAMODB_*`.
 
 ```python
 from mbse.Persistence.DynamoDB import Store
-from mbse.Schemas.Framework import Builders, Changes
+from mbse.Schemas.Framework import Builders
 
 kept = Store.Store("mbse-store", store="crm", region="us-east-1")   # on AWS, with boto3's credentials
 kept = Store.Store("mbse-store", store="crm", endpoint_url="http://localhost:8000", region="us-east-1")  # DynamoDB Local
 kept = Store.Store()                                                 # every setting from MBSE_DYNAMODB_*
-kept.transaction(install)          # its schemas, as any store is given them: they are not written to the table
 app = Builders.Store(kept)         # the app's store, which loads on demand and writes through
-app.transaction(install)
-Changes.observe(kept, print)       # each committed transaction's changes, in commit order
+app.transaction(install)           # its schemas, run in the store kept in DynamoDB first: not written to the table
+kept.follow(print)                 # each committed transaction's changes, in commit order
 kept.poll()                        # what other processes committed since, given to the app's store and to followers
 ```
 
-`kept.document(path)` gives one object's document, `kept.journal(after)` the journal from any entry. A transaction
-another process overtook at its commit is interpreted again, caught up, and refused where what the other committed
-refuses it; one written in a `with kept.transaction():` block raises `Store.Conflict` instead, to be run again. The
-table is made if absent (`create=False`, or `MBSE_DYNAMODB_CREATE=0`, not to); several stores share one table, each
-under its own `store` name. How the table holds the journal, the index and the head is `Store`'s module docstring.
+The store kept in DynamoDB is a store below, mbse-schemas' public `Stores.Below`
+([CAP-306: a public store-below interface](https://github.com/pitaman71/mbse-basis/blob/main/docs/capabilities/README.md#CAP-306)), not a `Builders.Store`: an app reads and writes it
+through a store over it. `kept.document(path)` gives one object's document, `kept.journal(after)` the journal from
+any entry. A transaction another process overtook at its commit is interpreted again, caught up, and refused where what
+the other committed refuses it; after `attempts` times running, it raises `Store.Conflict`. The table is made if absent
+(`create=False`, or `MBSE_DYNAMODB_CREATE=0`, not to); several stores share one table, each under its own `store`
+name. How the table holds the journal, the index and the head is `Store`'s module docstring.
 
 ## Testing it
 
