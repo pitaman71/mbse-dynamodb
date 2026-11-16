@@ -23,10 +23,8 @@ def local(monkeypatch):
 
 
 def kept(name, **options):
-    """A store kept in DynamoDB Local, its schemas installed: one process's."""
-    made = Store.Store("mbse-test-local", store=name, region="us-east-1", endpoint_url=ENDPOINT, **options)
-    made.transaction(crm)
-    return made
+    """A store kept in DynamoDB Local: one process's."""
+    return Store.Store("mbse-test-local", store=name, region="us-east-1", endpoint_url=ENDPOINT, **options)
 
 
 def test_a_store_kept_in_dynamodb_local(local):
@@ -37,7 +35,7 @@ def test_a_store_kept_in_dynamodb_local(local):
     memory = Builders.Store()
     memory.transaction(crm)
     write(memory)
-    write(kept(name, max_actions=8))
+    write(above(kept(name, max_actions=8)))
     assert documents(kept(name)) == documents(memory)
 
     first, second = above(kept(name)), above(kept(name))
@@ -46,7 +44,8 @@ def test_a_store_kept_in_dynamodb_local(local):
         append(second, "n4", "two's")
 
     two = kept(name)
+    app = above(two)
     overtaking(two, lambda: append(first, "n5", "first's"))
-    with two.transaction():
-        two.crm.Person(person(two, "ada"), lambda p: p.name("Ada K."))
+    with app.transaction():
+        app.crm.Person(person(app, "ada"), lambda p: p.name("Ada K."))
     assert person(above(kept(name)), "ada").name.get() == "Ada K."
