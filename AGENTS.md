@@ -33,9 +33,10 @@ directory that holds `mbse/`; npm: the package's directory), where the package s
   module docstring. It uses mbse-schemas' public interface alone: no private name of it, nor a subclass overriding one
   (mbse-basis [CAP-306: a public store-below interface](https://github.com/pitaman71/mbse-basis/blob/main/docs/capabilities/README.md#CAP-306)).
 - `mbse/Persistence/DynamoDB/Table.py` holds the settings (`MBSE_DYNAMODB_*`) and the table.
-- `tests/test_below.py` and `tests/test_journals.py` run siblings' notebook suites, mbse-schemas' BLW and
-  mbse-journals' JRN, from their checkouts, case by case (`tests/notebooks.py`); `tests/test_rest.py` runs mbse-rest's
-  service over the store.
+- `tests/test_below.py` runs a sibling's notebook suite, mbse-schemas' BLW, from its checkout, case by case
+  (`tests/notebooks.py`); `tests/test_rest.py` runs mbse-rest's service over the store. A journal is not kept in a
+  store: what the store's follow gives, a one-transaction `Changes.Journal`, is held to mbse-schemas' BLW and CHG-14,
+  and positions and slices of it to mbse-journals, which the store uses.
 
 ## Commands
 

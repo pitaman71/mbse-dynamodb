@@ -13,22 +13,31 @@ An app's store is made over it, `Builders.Store(Store(...))`, and gives it its s
 - `commit(plain)` interprets a transaction's changes with mbse-schemas' own interpreter, a `Builders.Store` of its own
   over the index, so that it refuses what any store refuses
   ([CAP-293: an entry inserted against a unique clause refuses its transaction](mbse:mbse-basis/docs/capabilities/README.md#CAP-293));
-  that store records it (`Provenance`), since the index records nothing, and sends its changes to the index, which
-  commits them within one DynamoDB transaction (`TransactWriteItems`) that orders it: its journal entry, the index
-  items it changes, and the head, the count of the journal's entries, on condition that no other has committed since
-  this store last caught up. Where another has, the store catches up and interprets the transaction again, up to
-  `attempts` times: what the other committed may now refuse it. It gives back the journal entry, its record among it.
+  that store records it (`Provenance`), since the index records nothing, and gives its followers what it committed as a
+  one-transaction journal (`Changes.Journal`, as its `follow` gives it). The store then commits it within one DynamoDB
+  transaction (`TransactWriteItems`) that orders it: that journal's transaction, the index items it changes, and the
+  head, the count of the journal's transactions, on condition that no other has committed since this store last caught
+  up. Where another has, or the table refuses or fails it, the interpreter, which committed it first, is made again,
+  holding nothing but its installs; where another committed first, the store catches up and interprets the transaction
+  again, up to `attempts` times: what the other committed may now refuse it. It gives back the transaction as the
+  interpreter committed it, a mutation transaction, its record among it.
 - `install(plain)` runs an install in its interpreter: the schemas are no part of the table, so that each process gives
   its store its installs, as a store above does.
-- `follow(follower)` gives `follower` each journal entry in commit order: this store's own as it commits them, and
-  others', committed by other processes, as it catches up, before each commit and on `poll()`, read from the table.
+- `follow(follower)` gives `follower` each transaction in commit order, as a one-transaction journal: this store's own
+  as it commits them, and others', committed by other processes, as it catches up, before each commit and on `poll()`,
+  read from the table.
 - `records` is true: it records each transaction, the lowest store.
 
 The table holds, under the store's partition key:
 
 - `H`, the head: `seq`, the number of the last journal entry, and `indexed`, the last whose index items are written.
-- `L#<n>#<part>`, journal entry `n` from 1: the transaction's changes as mbse-schemas writes them, the journal language
+- `L#<n>#<part>`, the journal's transaction `n` from 1: a `Changes.Transaction` as plain data, as mbse-schemas' follow
+  gives it, its `id`, its `symbols` and its `changes`
   ([CAP-271: the journal language](mbse:mbse-basis/docs/capabilities/README.md#CAP-271)), UTF-8 JSON in parts. It is the record.
+  A table written by mbse-dynamodb before 0.3.0 holds each entry as a mutation transaction instead, which is refused
+  where it is read.
+- `T#<id>`, by a hash of a transaction's `id`, the number of the journal's transaction of that id: a position, from
+  which a follower reads on (`journal(after)`).
 - `O#<object>#D#<part>`, the index, by a hash of each object's path: its document as the interpreter gives it
   (`document(path)`), and the paths it links, in parts; and `O#<object>#B#<other>`, each object whose document links
   it, so that a deletion reaches what links what it deleted. It is how the database answers a read of one object: it
@@ -37,11 +46,12 @@ The table holds, under the store's partition key:
 - `P#<n>#<part>`, the index items of entry `n`, where they are too many for one DynamoDB transaction beside it: written
   with the entry, and then written out, by the writer or by whichever store reads next, before `indexed` reaches `n`.
 
-The index items a transaction changes are computed from the interpreter's documents after it, within its transaction:
-of each object its changes name, and each it made, which it holds; an object they delete, named by its owner's key,
+The index items a transaction changes are computed from the interpreter's documents once it has committed it, before
+the table does: of each object its changes name, and each it made, which it holds; an object they delete, named by its owner's key,
 goes with what it owns, as the documents before it say; and each other document that linked one of those loses those
 entries. Nothing here is a snapshot: a store that starts loads what it is asked for from the index, and a follower
-that starts reads the journal from any entry (`journal`).
+that starts reads the journal after any transaction, by its id (`journal(after)`), sliced as mbse-journals slices a
+journal (`Journals.after`).
 """
 
 from __future__ import annotations
@@ -56,6 +66,7 @@ from typing import Any
 
 import boto3
 from botocore.exceptions import ClientError
+from mbse.Journals.Framework import Journals
 from mbse.Schemas.Framework import Builders, Paths, Plain
 
 from .Table import create_table, environment
@@ -99,6 +110,10 @@ def _log_key(log: str, number: int, part: int) -> str:
 
 def _object_key(path: Any) -> str:
     return f"O#{_hash(path)}#"
+
+
+def _position_key(position: str) -> str:
+    return f"T#{_hash(position)}"
 
 
 # --- Plain data: paths and documents, as mbse-schemas writes them ---
@@ -187,9 +202,9 @@ def _without(document: Any, gone: Callable[[Any], bool]) -> Any:
 
 class _Index:
     """The index, as the store below the store's interpreter (`Stores.Below`): it gives an object's document from the
-    table, and commits what the interpreter commits, its journal entry and its index items, within one DynamoDB
-    transaction. It records nothing, so that the interpreter, the lowest store, records each transaction
-    (`Provenance`); it holds no schemas, so that an install is the interpreter's alone."""
+    table, and takes what the interpreter commits as it is given, which the store writes to the table once the
+    interpreter has given it as a journal. It records nothing, so that the interpreter, the lowest store, records each
+    transaction (`Provenance`); it holds no schemas, so that an install is the interpreter's alone."""
 
     records = False
 
@@ -201,7 +216,7 @@ class _Index:
         return self.store.document(path)
 
     def commit(self, plain: Any) -> Any:
-        self.store._commit(plain, self.store._writes(plain))
+        self.store._sent = plain
         return plain
 
     def install(self, plain: Any) -> None:
@@ -257,8 +272,54 @@ class Store:
                 raise
         self._seq = self._head()[0]  # the last entry its interpreter and its followers have been given
         self._followers: dict[object, Callable[[Any], None]] = {}
+        self._installs: list[Any] = []  # each install given, in order: what an interpreter made again is given
+        self._sent: Any = None  # what the interpreter sent the index of the transaction it commits, not yet journaled
+        self._pending: tuple[Any, Any] | None = None  # that, and its journal, once given: to write to the table
+        self._renew()
+
+    def _renew(self) -> None:
+        """The interpreter made, holding nothing but its installs: at the start, or again where what it committed was
+        not committed to the table. It interprets each transaction, loading from the index; it is followed, so that what
+        it commits is given as a journal."""
         self._index = _Index(self)
-        self._interpreter = Builders.Store(self._index)  # interprets each transaction, loading from the index
+        self._interpreter = Builders.Store(self._index)
+        self._interpreter.follow(self._interpreted)
+        for plain in self._installs:
+            self._interpreter.install(plain)
+
+    def _interpreted(self, journal: Any) -> None:
+        """A journal the interpreter gives its followers: of a transaction of its own, which it sent the index, kept with
+        what it sent, to write to the table; of another's it applied as it caught up, left, the store's followers given
+        the whole of it from the table."""
+        if self._sent is not None:
+            self._pending, self._sent = (self._sent, journal), None
+
+    def _interpret(self, run: Callable[[], Any], attempts: int, catch_up: bool = True) -> Any:
+        """What `run` gives, the interpreter's commit of a transaction or its install; what it committed written to the
+        table, then given to the followers; where another store committed first, the interpreter made again, and run
+        again, up to `attempts` times, each caught up first where `catch_up`. An install is run once, not caught up:
+        what others committed may need the schemas it gives, and one that writes data, overtaken, is refused
+        (`Conflict`)."""
+        for _ in range(attempts):
+            if catch_up:
+                self._catch_up()
+            self._sent = self._pending = None
+            given = run()
+            if self._pending is None:  # nothing committed
+                return given
+            (effect, journal), self._pending = self._pending, None
+            try:
+                self._commit(journal, self._writes(effect))
+            except _Conflict:
+                self._renew()
+                continue
+            except BaseException:
+                self._renew()
+                raise
+            for follower in list(self._followers.values()):
+                follower(journal)
+            return given
+        raise Conflict(f"{self.table}/{self.store_name}: other stores committed first {attempts} times running")
 
     # --- Stores.Below ---
 
@@ -280,38 +341,30 @@ class Store:
         its schema alone, as the store's interpreter holds it; None for any other object, or a singleton it has no
         schema of."""
         singleton, steps = _steps(path)
-        if steps:
+        schemas = [schema for schema in map(self._interpreter.registered, self._interpreter.names())
+                   if getattr(schema, "singleton", None) == singleton]  # a schema object, read with no transaction open
+        if steps or not schemas:
             return None
-        try:
-            schema = self._interpreter.singleton(singleton).as_schema()
-        except LookupError:
-            return None
-        at = Paths.of(schema)
+        at = Paths.of(schemas[0])
         return {"mutations": [{"upsert": {"exists": [{"symbols": {"0": {"schema": [
             {"$schema": "References.OfObject", "path": Plain.ToPlain(None)(at.as_schema(), at)}]}}}]}}]}
 
     def commit(self, plain: Any) -> Any:
         """Commits a transaction's changes, refused as the interpreter refuses them, interpreted again where another
-        store committed first; gives back its journal entry, its record among it, None where it changed nothing. Its
-        followers are given it once committed."""
-        for _ in range(self.attempts):
-            self._catch_up()
-            try:
-                committed = self._interpreter.commit(plain)
-            except _Conflict:
-                continue
-            if committed is not None:
-                for follower in list(self._followers.values()):
-                    follower(committed)
-            return committed
-        raise Conflict(f"{self.table}/{self.store_name}: other stores committed first {self.attempts} times running")
+        store committed first; gives back the transaction as the interpreter committed it, its record among it, None
+        where it changed nothing. Its followers are given its journal once the table holds it."""
+        return self._interpret(lambda: self._interpreter.commit(plain), self.attempts)
 
     def install(self, plain: Any) -> None:
-        """Runs an install in the interpreter: its schemas, which the table does not hold."""
-        self._interpreter.install(plain)
+        """Runs an install in the interpreter: its schemas, which the table does not hold, kept to give an interpreter
+        made again; what it writes besides, data, committed as a transaction is."""
+        self._interpret(lambda: self._interpreter.install(plain), 1, catch_up=False)
+        if all(_canonical(plain) != _canonical(held) for held in self._installs):
+            self._installs.append(plain)
 
     def follow(self, follower: Callable[[Any], None]) -> Callable[[], None]:
-        """Gives `follower` each journal entry from now, in commit order; gives back a function that ends it."""
+        """Gives `follower` each transaction from now, in commit order, as a one-transaction journal (`Changes.Journal`,
+        as plain data); gives back a function that ends it."""
         token = object()  # this following, though the same follower follow twice
         self._followers[token] = follower
 
@@ -322,12 +375,18 @@ class Store:
 
     # --- The journal ---
 
-    def journal(self, after: int = 0) -> Iterator[Any]:
-        """The changes of each transaction committed, in commit order, as plain data: from the first, or those after
-        entry `after`."""
+    def journal(self, after: str | None = None) -> Journals.Journal:
+        """The journal of the transactions committed, in commit order, a `Changes.Journal` as plain data: from the
+        first, or after the transaction of id `after`, a position, as mbse-journals' `Journals.after` slices it; a
+        position the table holds no transaction of is refused (`LookupError`)."""
         last = self._head()[0]
-        for number in range(after + 1, last + 1):
-            yield self._record("L", number)
+        first = 1 if after is None else self._number(after)
+        return Journals.after([self._entry(number) for number in range(first, last + 1)], after)
+
+    def head(self) -> str | None:
+        """The position of the last transaction committed, its id; None where none is."""
+        last = self._head()[0]
+        return None if last == 0 else self._entry(last)["id"]
 
     def poll(self) -> int:
         """Gives the interpreter, and the followers, each transaction another store committed since it last caught up,
@@ -339,12 +398,29 @@ class Store:
         given."""
         last, count = self._head()[0], 0
         while self._seq < last:
-            plain = self._record("L", self._seq + 1)
+            journal = [self._entry(self._seq + 1)]
             self._seq += 1
             count += 1
             for follower in [*self._index.followers, *self._followers.values()]:
-                follower(plain)
+                follower(journal)
         return count
+
+    def _entry(self, number: int) -> Any:
+        """The journal's transaction `number`, a `Changes.Transaction` as plain data; refused where the table holds it
+        as mbse-dynamodb wrote it before 0.3.0, a mutation transaction."""
+        transaction = self._record("L", number)
+        if not (isinstance(transaction, dict) and isinstance(transaction.get("id"), str)):
+            raise ValueError(f"{self.table}/{self.store_name}: the journal's transaction {number} is no "
+                             "Changes.Transaction, as mbse-dynamodb before 0.3.0 wrote it: this store cannot read it")
+        return transaction
+
+    def _number(self, position: str) -> int:
+        """The number of the journal's transaction of id `position`; refused (`LookupError`) where it holds none."""
+        item = self.client.get_item(TableName=self.table, Key=self._item_key(_position_key(position)),
+                                    ConsistentRead=True).get("Item")
+        if item is None:
+            raise LookupError(f"{self.table}/{self.store_name}: the journal holds no transaction {json.dumps(position)}")
+        return int(item["seq"]["N"])
 
     # --- The index: what a transaction changes ---
 
@@ -361,7 +437,7 @@ class Store:
         return [json.loads(item["data"]["S"]) for item in self._query(prefix, prefix + END)]
 
     def _written(self, path: Any) -> Any:
-        """The object's document as the interpreter gives it, within the transaction it commits: a record of it, and of
+        """The object's document as the interpreter gives it, once it has committed the transaction: a record of it, and of
         the paths it links; one the interpreter refuses, as it refuses one that links a counted object, kept refused."""
         try:
             document = self._interpreter.document(path)
@@ -509,9 +585,14 @@ class Store:
                            "ConditionExpression": "#seq = :n AND #ix = :n",
                            "ExpressionAttributeNames": names, "ExpressionAttributeValues": values}}
 
-    def _commit(self, plain: Any, writes: dict[str, str | None]) -> None:
+    def _commit(self, journal: Any, writes: dict[str, str | None]) -> None:
+        """Commits a one-transaction journal, its transaction the journal's next, its position, and its index items,
+        within one DynamoDB transaction where they fit, else its index items kept apart, written out after."""
         number = self._seq + 1
-        log = [{"Put": {"TableName": self.table, "Item": item}} for item in self._parts("L", number, plain)]
+        (transaction,) = journal
+        log = [{"Put": {"TableName": self.table, "Item": item}} for item in self._parts("L", number, transaction)]
+        log.append({"Put": {"TableName": self.table, "Item": {**self._item_key(_position_key(transaction["id"])),
+                                                               "seq": {"N": str(number)}}}})
         index = self._actions(writes)
         together = [self._advance(number, True), *log, *index]
         if len(together) <= self.max_actions and _size(together) <= self.max_bytes:

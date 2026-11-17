@@ -14,7 +14,7 @@ from mbse.Persistence.DynamoDB import Store as DynamoDB
 from mbse.Services.Rest import Conformance, Service, Store
 
 from conftest import REGION
-from test_store import add, append, crm, person
+from test_store import add, append, contacts, crm, lasts, person, read
 
 TSK_1 = {"singleton": "work.Tasks", "next": {"entry": {"i": "tasks", "o": "directory", "properties": {"id": "TSK-001"},
                                                        "next": {"target": {}}}}}
@@ -49,18 +49,18 @@ def test_the_service_selects_the_store_kept_in_dynamodb(aws, monkeypatch):
     environ = {"MBSE_REST_STORE": "mbse.Persistence.DynamoDB.Store:Store"}
     first = TestClient(Service.from_environment(environ))
     below = first.app.state.service.below
-    assert isinstance(below, DynamoDB.Store) and len(list(below.journal())) == 1  # the seed
+    assert isinstance(below, DynamoDB.Store) and [t["id"] for t in below.journal()] == ["work.seed/1"]
     store = first.app.state.service.store
     body = Conformance._edit(store, lambda s: Plain.FromPlain(s)(s.References.OfObject.as_schema(), {"path": TSK_1}),
                              {"title": "Kept in DynamoDB"})
     assert first.post("/views/detail", json=body).status_code == 200
-    assert len(list(below.journal())) == 2
+    assert len(below.journal()) == 2
     again = TestClient(Service.from_environment(environ))
-    assert again.get("/changes").json()["head"] == 0  # not seeded again: the journal holds what it wrote
+    assert again.get("/changes").json()["head"] is None  # not seeded again: the journal holds what it wrote
     assert title(again, TSK_1) == "Kept in DynamoDB"
     items = aws.scan(TableName="demo")["Items"]
-    assert {item["key"]["S"][0] for item in items} == {"H", "L", "O", "P"}  # the head, the journal, the index and
-    # an entry's index items kept apart, the seed's being many: no snapshot
+    assert {item["key"]["S"][0] for item in items} == {"H", "L", "T", "O", "P"}  # the head, the journal and its
+    # positions, the index and an entry's index items kept apart, the seed's being many: no snapshot
 
 
 def test_two_services_over_one_store_kept_in_dynamodb(aws):
@@ -78,12 +78,15 @@ def test_two_services_over_one_store_kept_in_dynamodb(aws):
     add(here, "ada", "bob")
     seen = []
     Changes.observe(there, seen.append)
-    assert sorted(e.key.get() for e in there.singleton("crm.TheBook").contacts) == ["ada", "bob"]  # loaded, on demand
-    assert person(there, "ada").name.get() == "ada"
+    assert sorted(contacts(there)) == ["ada", "bob"]  # loaded, on demand
+
+    def ada(s):
+        return read(s, lambda s: person(s, "ada").name.get())
+    assert ada(there) == "ada"
     with here.transaction():
         here.crm.Person(person(here, "ada"), lambda p: p.name("Ada"))
-    assert person(there, "ada").name.get() == "ada"  # not yet read
-    assert remotes[1].poll() == 1 and person(there, "ada").name.get() == "Ada" and len(seen) == 1
+    assert ada(there) == "ada"  # not yet read
+    assert remotes[1].poll() == 1 and ada(there) == "Ada" and len(seen) == 1
     append(here, "n1", "first")
     remotes[1].poll()
     append(here, "n2", "here's")
@@ -94,5 +97,5 @@ def test_two_services_over_one_store_kept_in_dynamodb(aws):
             note = there.crm.Note(lambda n: n.book(lambda a: a.insert(lambda e: e.name("n3").book(book))).text("there's"))
             there.crm.Book(book, lambda b: b.last(lambda a: a.remove(lambda e: e.note(last)).insert(lambda e: e.note(note))))
     remotes[1].poll()
-    assert [e.note.text.get() for e in there.singleton("crm.TheBook").last] == ["here's"]
-    assert len(list(services[0].state.service.below.journal())) == 4  # ada and bob, Ada, n1, n2: n3 refused
+    assert lasts(there) == ["here's"]
+    assert len(services[0].state.service.below.journal()) == 4  # ada and bob, Ada, n1, n2: n3 refused
