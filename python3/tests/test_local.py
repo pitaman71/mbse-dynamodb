@@ -10,7 +10,7 @@ import pytest
 from mbse.Schemas.Framework import Builders
 
 from mbse.Persistence.DynamoDB import Store
-from test_store import above, append, crm, documents, overtaking, person, write
+from test_store import above, append, crm, documents, lasts, overtaking, person, read, write
 
 ENDPOINT = os.environ.get("MBSE_DYNAMODB_LOCAL")
 pytestmark = pytest.mark.skipif(not ENDPOINT, reason="MBSE_DYNAMODB_LOCAL gives no DynamoDB Local endpoint")
@@ -39,6 +39,7 @@ def test_a_store_kept_in_dynamodb_local(local):
     assert documents(kept(name)) == documents(memory)
 
     first, second = above(kept(name)), above(kept(name))
+    assert lasts(second) == ["second"]  # the last as the second sees it, before the first appends after it
     append(first, "n3", "one's")
     with pytest.raises(ValueError, match="breaks unique"):
         append(second, "n4", "two's")
@@ -48,4 +49,5 @@ def test_a_store_kept_in_dynamodb_local(local):
     overtaking(two, lambda: append(first, "n5", "first's"))
     with app.transaction():
         app.crm.Person(person(app, "ada"), lambda p: p.name("Ada K."))
-    assert person(above(kept(name)), "ada").name.get() == "Ada K."
+    assert read(above(kept(name)), lambda s: person(s, "ada").name.get()) == "Ada K."
+    assert [t["id"] for t in kept(name).journal()][-1] == kept(name).head()  # each a Changes.Transaction, by its id
