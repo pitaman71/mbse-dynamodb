@@ -121,12 +121,15 @@ def _under(path: Any, owner: Any) -> bool:
 
 
 def _references(plain: Any) -> Iterator[Any]:
-    """The path of each object a transaction's changes name by its reference."""
+    """The path of each object a transaction's changes bind to a symbol by its reference: a symbol's `{"reference":
+    {"path": ...}}`, not a link's, which `_links` reads."""
     if isinstance(plain, dict):
-        reference = plain.get("reference")
-        if len(plain) == 1 and isinstance(reference, dict) and "path" in reference:
-            yield reference["path"]
-        for value in plain.values():
+        for name, value in plain.items():
+            if name == "symbols" and isinstance(value, dict):
+                for bound in value.values():
+                    reference = bound.get("reference") if isinstance(bound, dict) and len(bound) == 1 else None
+                    if isinstance(reference, dict) and "path" in reference:
+                        yield reference["path"]
             yield from _references(value)
     elif isinstance(plain, list):
         for value in plain:
@@ -134,11 +137,13 @@ def _references(plain: Any) -> Iterator[Any]:
 
 
 def _links(plain: Any) -> Iterator[Any]:
-    """The path of each object a document, or an entry of one, links."""
+    """The path of each object a document, or an entry of one, links: a link set to an object by its path, `{"set":
+    {"reference": {"path": ...}}}` ([CAP-316: one written form for references](mbse:mbse-basis/docs/capabilities/CAP-316.md))."""
     if isinstance(plain, dict):
-        ref = plain.get("ref")
-        if len(plain) == 1 and isinstance(ref, dict) and "path" in ref:
-            yield ref["path"]
+        given = plain.get("set")
+        reference = given.get("reference") if isinstance(given, dict) and len(given) == 1 else None
+        if isinstance(reference, dict) and "path" in reference:
+            yield reference["path"]
         for value in plain.values():
             yield from _links(value)
     elif isinstance(plain, list):
@@ -283,7 +288,7 @@ class Store:
             return None
         at = Paths.of(schema)
         return {"mutations": [{"upsert": {"exists": [{"symbols": {"0": {"schema": [
-            {"$ref": Plain.ToPlain(None)(at.as_schema(), at)}]}}}]}}]}
+            {"$schema": "References.OfObject", "path": Plain.ToPlain(None)(at.as_schema(), at)}]}}}]}}]}
 
     def commit(self, plain: Any) -> Any:
         """Commits a transaction's changes, refused as the interpreter refuses them, interpreted again where another
