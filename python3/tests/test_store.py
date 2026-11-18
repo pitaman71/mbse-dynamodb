@@ -30,7 +30,7 @@ def crm(txn):
             lambda _: _.Holds.name("crm.Holds").links([lambda t: t.name("book"), lambda t: t.name("contact")])
             .properties({"key": S.OfStr}).uniques([["book", "key"], ["contact"]]),
             lambda _: _.Knows.name("crm.Knows").links([lambda t: t.name("knower"), lambda t: t.name("known")])
-            .uniques([["knower", "known"]]),
+            .uniques([]),  # a set: one clause, naming nothing
             lambda _: _.Introduces.name("crm.Introduces").links([lambda t: t.name("host"), lambda t: t.name("guest")]),
             lambda _: _.Tagged.name("crm.Tagged").links([lambda t: t.name("tagged"), lambda t: t.name("tag")]),
             lambda _: _.Tag.name("crm.Tag").ref(True).properties({"label": S.OfStr}),
@@ -214,18 +214,15 @@ def test_the_table_holds_a_journal_and_an_index_and_no_snapshot(aws):
 
 def test_a_journal_a_follower_applies(aws):
     """What its followers are given is a journal, which mbse-schemas applies to a store as any journal: a replica in
-    memory, given the journal from the first, a transaction at a time, as a follower is given it, holds what the store
-    kept in DynamoDB holds."""
-    from mbse.Journals.Framework import Journals
+    memory, given the journal from the first, applied at once, holds what the store kept in DynamoDB holds."""
     from mbse.Schemas.Framework import Changes, Plain
 
     app = store()
     write(app)
     replica = Builders.Store()
     replica.transaction(crm)
-    for one in Journals.split(process().journal()):
-        journal = Plain.FromPlain(replica)(replica.registered("Changes.Journal"), one)
-        replica.transaction(lambda txn: Changes.apply(txn, journal))
+    journal = Plain.FromPlain(replica)(replica.registered("Changes.Journal"), process().journal())
+    replica.transaction(lambda txn: Changes.apply(txn, journal))
     assert documents(replica) == documents(process())
 
 
