@@ -1,8 +1,8 @@
 # Guide for AI agents
 
-mbse-schemas stores kept in DynamoDB: a store kept in DynamoDB, below a lazy `Builders.Store`, its journal the record
-and an index from which it reads one object, no snapshot (mbse-basis [FEA-006: persistence](https://github.com/pitaman71/mbse-basis/blob/main/docs/features/FEA-006.md), [CAP-289: journals kept in DynamoDB](https://github.com/pitaman71/mbse-basis/blob/main/docs/capabilities/README.md#CAP-289)), which
-mbse-rest's service serves a store over ([CAP-290: a service's store stacked, with no snapshot](https://github.com/pitaman71/mbse-basis/blob/main/docs/capabilities/README.md#CAP-290)). Python, in `python3/mbse/Persistence/DynamoDB`
+mbse-schemas stores kept in DynamoDB: a store kept in DynamoDB, the lowest layer of a stack, which interprets each
+transaction with an interpreter of its own over its index, its journal the record, no snapshot (mbse-basis [FEA-006: persistence](https://github.com/pitaman71/mbse-basis/blob/main/docs/features/FEA-006.md), [CAP-289: journals kept in DynamoDB](https://github.com/pitaman71/mbse-basis/blob/main/docs/capabilities/README.md#CAP-289)), which
+mbse-rest's service serves ([CAP-290: a service's store stacked, with no snapshot](https://github.com/pitaman71/mbse-basis/blob/main/docs/capabilities/README.md#CAP-290)). Python, in `python3/mbse/Persistence/DynamoDB`
 (`mbse.Persistence.DynamoDB`).
 
 ## Read before any work
@@ -28,15 +28,19 @@ directory that holds `mbse/`; npm: the package's directory), where the package s
 
 ## This repository
 
-- `mbse/Persistence/DynamoDB/Store.py` is the store kept in DynamoDB, a store below (mbse-schemas' `Stores.Below`),
-  which interprets each transaction in a `Builders.Store` of its own over its index: how the table holds it is its
-  module docstring. It uses mbse-schemas' public interface alone: no private name of it, nor a subclass overriding one
-  (mbse-basis [CAP-306: a public store-below interface](https://github.com/pitaman71/mbse-basis/blob/main/docs/capabilities/README.md#CAP-306)).
+- `mbse/Persistence/DynamoDB/Store.py` is the store kept in DynamoDB, a `Builders.Store` holding the schemas alone,
+  whose transaction is the table's, committed in one DynamoDB transaction: how the table holds it is its module
+  docstring. `mbse/Persistence/DynamoDB/Layer.py` is its interpreter, a class of mbse-schemas'
+  `Transactions.Interpreter`, coupled with it, whose hooks read the index within the transaction and hold its writes.
+  Both use mbse-schemas' public interface but for the two names `Layer` lists, which the base class's contract names
+  (README, Decided by an agent): no other private name of it, nor a subclass overriding one (mbse-basis [CAP-306: a public store-below interface](https://github.com/pitaman71/mbse-basis/blob/main/docs/capabilities/README.md#CAP-306)),
+  which `tests/test_layer.py` checks.
 - `mbse/Persistence/DynamoDB/Table.py` holds the settings (`MBSE_DYNAMODB_*`) and the table.
 - `tests/test_below.py` runs a sibling's notebook suite, mbse-schemas' BLW, from its checkout, case by case
-  (`tests/notebooks.py`); `tests/test_rest.py` runs mbse-rest's service over the store. A journal is not kept in a
-  store: what the store's follow gives, a one-transaction `Changes.Journal`, is held to mbse-schemas' BLW and CHG-14,
-  and positions and slices of it to mbse-journals, which the store uses.
+  (`tests/notebooks.py`), the store kept in DynamoDB its layer below; `tests/test_rest.py` runs mbse-rest's service
+  serving the store. A journal is not kept in a store: what the store's follow gives, a one-transaction
+  `Changes.Journal`, is held to mbse-schemas' BLW, and positions and slices of it to mbse-journals, which the store
+  uses.
 
 ## Commands
 
