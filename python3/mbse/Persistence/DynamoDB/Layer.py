@@ -612,11 +612,11 @@ class Layer(Transactions.Interpreter):
 
     def settle(self) -> None:
         """Before the transaction commits: refuses an owned object it made with no owner, which a store kept in DynamoDB
-        gives none; deletes each object a removal left with no owner, and, in cascade, what it owns, every entry
+        gives none, but one it gave one and removed it from since; deletes each object a removal left with no owner, and, in cascade, what it owns, every entry
         linking either removed (object identity 48 in
         [CAP-121: owned objects deleted in cascade](mbse:mbse-basis/docs/capabilities/CAP-121.md#decided))."""
         state = self.held
-        for row in [row for row in state.rows.values() if row["created"]]:
+        for row in [row for row in state.rows.values() if row["created"] and row["oid"] not in state.orphans]:
             owners = _owners(self.store.registered(row["schema"]))
             if owners and not self._owning(row):
                 names = ", ".join(repr(a.name or a.relation.name) for a in owners)
@@ -764,8 +764,9 @@ class Layer(Transactions.Interpreter):
         then those it inserted, each written on the adjacency of an object it links, then the properties it changed.
         An object it deleted is never named: the entry that owned it is removed by its owner's key for it, and what its
         deletion removed in cascade follows from that, as mbse-schemas' `Changes` has it."""
-        created = {r["oid"]: r for kind, r, *_ in log if kind == "create" and not r["gone"]}
-        deleted = {r["oid"] for kind, r, *_ in log if kind == "delete" and r["oid"] not in created}
+        made = {r["oid"]: r for kind, r, *_ in log if kind == "create"}
+        created = {oid: r for oid, r in made.items() if not r["gone"]}
+        deleted = {r["oid"] for kind, r, *_ in log if kind == "delete" and r["oid"] not in made}
         paths: dict[str, PlainData] = {}
         for kind, *record in log:
             if kind == "path":
@@ -845,16 +846,14 @@ class Layer(Transactions.Interpreter):
 
     def _writer(self, entry: dict[str, Any], created: Mapping[str, Any]) -> tuple[str, str]:
         """The link, and its object's adjacency by name, that writes an entry's change: an object held before, not
-        counted, where one can, so that what the entry links is found through it."""
+        counted, where one can, so that what the entry links is found through it. There is one: the layer inserts an
+        entry through an adjacency by name alone."""
         relation = self.store.registered(entry["relation"])
         choices = []
         for link, oid in entry["links"].items():
             schema = self.store.registered(self._row(oid)["schema"])
             choices += [(_counted(schema) or oid in created, link, name) for name, adjacency in schema.adjacencies.items()
                         if adjacency.relation is relation and adjacency.me == link]
-        if not choices:
-            raise ValueError(f"no object an entry of {entry['relation']!r} links has an adjacency to it by name, so that "
-                             "its change cannot be written: name one")
         _, link, name = min(choices, key=lambda choice: choice[0])
         return link, name
 
