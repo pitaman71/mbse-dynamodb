@@ -32,8 +32,8 @@ directory that holds `mbse/`; npm: the package's directory), where the package s
   whose transaction is the table's, committed in one DynamoDB transaction: how the table holds it is its module
   docstring. `mbse/Persistence/DynamoDB/Layer.py` is its interpreter, a class of mbse-schemas'
   `Transactions.Interpreter`, coupled with it, whose hooks read the index within the transaction and hold its writes.
-  Both use mbse-schemas' public interface but for the two names `Layer` lists, which the base class's contract names
-  (README, Decided by an agent): no other private name of it, nor a subclass overriding one (mbse-basis [CAP-306: a public store-below interface](https://github.com/pitaman71/mbse-basis/blob/main/docs/capabilities/README.md#CAP-306)),
+  Both use mbse-schemas' public interface alone, what every layer shares among it (README, Decided by an agent): no
+  private name of it, nor a subclass overriding one (mbse-basis [CAP-306: a public store-below interface](https://github.com/pitaman71/mbse-basis/blob/main/docs/capabilities/README.md#CAP-306)),
   which `tests/test_layer.py` checks.
 - `mbse/Persistence/DynamoDB/Table.py` holds the settings (`MBSE_DYNAMODB_*`) and the table.
 - `tests/test_below.py` runs a sibling's notebook suite, mbse-schemas' BLW, from its checkout, case by case
