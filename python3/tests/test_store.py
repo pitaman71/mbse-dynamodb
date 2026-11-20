@@ -397,6 +397,44 @@ def test_an_object_made_with_no_owner_is_refused(aws):
     assert kept.journal() == []
 
 
+def badges(txn):
+    """crm.Badge, a crm.Tag with a level besides: a schema refining another."""
+    S = txn.Schemas
+    return txn.uid("badges/1").mutations([lambda mu: mu.upsert(lambda u: u.exists([lambda p: p.symbols(
+        {"Badge": S.OfObject}).spec([lambda _: _.Badge.name("crm.Badge").ref(True).refines([txn.crm.Tag]).properties(
+            {"level": S.OfInt})])]))])
+
+
+def tag_ada(kind, label, uid):
+    """Ada tagged with a counted tag of `kind`, labelled `label`."""
+    return lambda t: t.uid(uid).mutations([lambda mu: mu.map(lambda m: m.symbols([lambda p: p.symbols(
+        {"x": reference(t._store, contact("ada"))})])).then([lambda w: w.upsert(lambda u: u.exists([lambda p: p.symbols(
+            {"g": getattr(t.crm, kind), "x": reference(t._store, contact("ada"))}).spec([
+                lambda _: _.g.label(label).on(lambda a: a.insert(lambda e: e.tagged(_.x)))])]))])])
+
+
+def test_a_symbol_binds_objects_of_the_schemas_refining_its_own(aws):
+    """A symbol's candidates are the objects of its schema and of each schema refining it, as a store in memory's extent
+    has them: a map over crm.Tag binds a crm.Badge too, a spec on what crm.Tag declares finding it; one over crm.Badge
+    binds the badge alone."""
+    kept, twin = process(), memory()
+    for store in (kept, twin):
+        for spec in (badges, person("ada", "Ada"), tag_ada("Tag", "vip", "tag/1"), tag_ada("Badge", "gold", "tag/2")):
+            store.transaction(spec)
+
+    def mapped(kind, label=None):
+        spec = [] if label is None else [lambda _: _.g.label(label)]
+        return lambda t: t.uid("mapped/1").mutations([lambda mu: mu.map(lambda m: m.symbols([lambda p: p.symbols(
+            {"g": getattr(t.crm, kind)}).spec(spec)]))])
+
+    for kind, label, count in (("Tag", None, 2), ("Tag", "gold", 1), ("Badge", None, 1), ("Badge", "vip", 0)):
+        assert len(kept.transaction(mapped(kind, label))) == len(twin.transaction(mapped(kind, label))) == count
+    Tag, Badge = kept.registered("crm.Tag"), kept.registered("crm.Badge")
+    assert held(kept, lambda layer: [(row["schema"], row["values"]["label"]) for row in layer.candidates(Tag)]) == [
+        ("crm.Tag", "vip"), ("crm.Badge", "gold")]
+    assert held(kept, lambda layer: [row["values"]["label"] for row in layer.candidates(Badge)]) == ["gold"]
+
+
 def test_a_counted_object_is_kept_and_refused_by_reference(aws):
     """A counted object has no reference: kept, and linked by the objects that have one; a frame binding it is refused,
     as a store in memory refuses it, but resumed within the transaction that gave it; the journal names it by its

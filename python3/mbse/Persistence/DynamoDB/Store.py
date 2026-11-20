@@ -3,7 +3,7 @@ interpreter of its own, coupled with it, reading and writing its index within th
 ([CAP-289: journals kept in DynamoDB](mbse:mbse-basis/docs/capabilities/README.md#CAP-289), as
 [the stacked stores proposal](mbse:mbse-basis/proposals/STACKED-STORES.md#a-cache-layer-and-the-layer-below), its third
 stage, and [the journal storage proposal](mbse:mbse-basis/proposals/JOURNAL-STORAGE.md) state), written against
-mbse-schemas' public interface but for the two names `Layer` lists.
+mbse-schemas' public interface.
 
 `Store(table, store=name)` is kept in one partition of a DynamoDB table. It is a `Builders.Store` holding the schemas
 alone, which each process gives it by its installs, and its transaction is one of the table's:
@@ -66,7 +66,7 @@ from mbse.Journals.Framework import Journals
 from mbse.Schemas.Framework import Builders, Plain
 from mbse.Schemas.Framework.Transactions import Frame
 
-from .Layer import Layer, Transaction, digest, expressed, installs
+from .Layer import Layer, Transaction, digest, installs
 from .Table import create_table, environment
 
 __all__ = ["Store", "Layout", "Conflict", "PART_BYTES", "MAX_ACTIONS", "MAX_BYTES"]
@@ -222,7 +222,7 @@ class Store(Builders.Store):
         install run in the store's schemas alone."""
         if spec is None:
             return self._kept_scope(Conflict)
-        expression = expressed(self, spec)
+        expression = self.expressed(spec)
         if installs(self, Plain.ToPlain(self).Transaction(expression)):
             return Builders.Store.transaction(self, expression)
         for _ in range(self.attempts):
@@ -250,7 +250,8 @@ class Store(Builders.Store):
             layer.settle()
             layer.record()
             layer.uniques()
-            journal = layer.changes(layer.held.log, layer.uid())
+            changed = layer.changes(layer.held.log, layer.uid())
+            journal = None if changed is None else Plain.ToPlain(self)(self.registered("Changes.Transaction"), changed)
             if journal is not None:
                 try:
                     self._kept_commit(journal, layer.writes())

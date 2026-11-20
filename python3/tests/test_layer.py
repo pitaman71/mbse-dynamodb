@@ -4,6 +4,9 @@ reads them; its savepoints; and what a transaction's writes leave, as the index 
 
 from __future__ import annotations
 
+import inspect
+import re
+
 import pytest
 from mbse.Schemas.Framework import Builders, Changes, Paths, Plain, Provenance, Transactions
 from mbse.Schemas.Framework.Transactions import Frame
@@ -23,7 +26,8 @@ def private(cls):
 def test_the_layer_is_an_interpreter_of_its_own_and_overrides_no_private_name(aws):
     """`Layer` is a `Transactions.Interpreter`, giving each hook the base class asks for, and the store's transaction a
     `Transactions.Transaction`; neither, nor the store, a `Builders.Store`, defines a name the class it extends keeps
-    private (mbse-basis CAP-306): each uses mbse-schemas' public interface, but the two names `Layer` lists."""
+    private (mbse-basis CAP-306), nor names a private name of mbse-schemas' modules: each uses mbse-schemas' public
+    interface alone."""
     kept = process()
     layer = kept._kept_layer
     assert isinstance(layer, Transactions.Interpreter) and not Transactions.Interpreter.__abstractmethods__ - set(
@@ -34,6 +38,10 @@ def test_the_layer_is_an_interpreter_of_its_own_and_overrides_no_private_name(aw
     store_taken = set().union(*(private(cls) for cls in Builders.Store.__mro__), vars(Builders.Store()))
     added = private(DynamoDB.Store) | (set(vars(kept)) - set(vars(Builders.Store())))
     assert added and not added & store_taken
+    modules = "Builders|Changes|Paths|Plain|Provenance|Proxies|References|Schemas|Transactions"
+    for module in (Layer, DynamoDB):
+        source = inspect.getsource(module)
+        assert not re.findall(rf"\b(?:{modules})\._\w+", source) and "_check_uniques" not in source
     with kept.transaction() as txn:
         assert isinstance(txn, Transactions.Transaction) and layer.state is not None and layer.life is txn.life_
     assert layer.state is None and layer.life is None
@@ -202,6 +210,19 @@ def test_what_its_journal_names_where_a_path_implies_no_schema(aws):
         assert (keeper.name.get(), [replica.member(e.animal, "lives") for e in keeper.animals]) == ("Zoe", [8])
     assert held(kept, lambda layer: layer.designated(cat)["values"]) == {"lives": 8}
     assert any(key.startswith("X#zoo.Keeper#") for key in keys(aws, "zoo"))
+
+
+def test_a_journal_applied_within_a_callback(aws):
+    """A callback given to the store is given its schemas by name as any store's is (`store.expressed`), so that
+    `Changes.apply` writes another store's journal within it: a store kept in DynamoDB made to hold what another holds,
+    transaction by transaction."""
+    kept, replica = process("s"), process("r")
+    for spec in (person("ada", "Ada", 36), person("bob", "Bob"), update(contact("ada"), lambda _: _.x.age(37), "a/1")):
+        kept.transaction(spec)
+    schema = replica.registered("Changes.Journal")
+    for transaction in kept.journal():
+        replica.transaction(lambda t, one=transaction: Changes.apply(t, Plain.FromPlain(replica)(schema, [one])))
+    assert people(replica) == people(kept) and len(replica.journal()) == len(kept.journal()) == 3
 
 
 def test_provenance_found_again(aws):
