@@ -72,9 +72,9 @@ Where the user's decisions were silent, the simplest choice consistent with them
 
 - **The index** is each object's row by its schema and an id given in the order objects are made (`X#<schema>#<oid>`),
   each owned object's path (`R#`), and each entry under every object it links (`E#<oid>#<eid>`), so that a symbol's
-  candidates, an object by its reference and the entries linking an object are each one query. A symbol's candidates
-  are the objects of its schema itself, not of schemas refining it, in the order they were made; an owned object is
-  among them once it has an owner. An object's entries are read whole the first time one is read.
+  candidates, an object by its reference and the entries linking an object are each one query for each schema. A
+  symbol's candidates are the objects of its schema and of each schema refining it, as a store in memory's extent has
+  them (one query for each), in the order they were made; an owned object is among them once it has an owner. An object's entries are read whole the first time one is read.
 - **A conflict is the head moved**: a commit is conditioned on the head being where the transaction began, so that
   any commit made meanwhile refuses it, as mbse-dynamodb 0.3 did; the store catches up as each transaction begins, the
   follow mode of a cache layer over it in a process being to catch up always (mbse-rest's client keeps its own modes).
@@ -88,13 +88,16 @@ Where the user's decisions were silent, the simplest choice consistent with them
   and `where`, else a uid of the store's, the time and `unknown`, as mbse-schemas' store in memory records one.
 - **One transaction at a time** is open on a store; another, in the same process, is refused.
 
-What mbse-schemas' base class keeps private that a database's layer needs (CAP-306): `Interpreter.given` is to give a
-`Transactions._Refused` for an object that has no reference, and the unique clauses a layer checks at its commit are
-`Interpreter._check_uniques`; `Layer` uses these two names, and nothing else private. It writes its own, from public
-data, where the store in memory's are private: a transaction's journal (`Changes._gather`), its record (`Provenance`),
-the schema a path implies, a relation holding one entry at most, an expression built from a callback given the
-store's schemas by name (so that `Changes.apply`, which reads mbse-schemas' own, is not given one by this store), and
-the frames a scope raises the first error of (`Transaction._raise`).
+`Layer` and `Store` use mbse-schemas' public interface alone (CAP-306), which, since mbse-schemas 0.36.0, gives a layer
+what every layer shares, one copy, each through its interpreter's hooks: `Transactions.Refused`, what `given` gives
+for an object that has no reference; `Interpreter.check_uniques`, the unique clauses checked at commit;
+`Transactions.single`, a relation holding one entry at most; `References.implied`, the schema a path implies;
+`Changes.gather`, a transaction's journal from what it changed, net; `Provenance.record`, its record; and
+`store.expressed`, an expression built from a callback given the store's schemas by name, so that `Changes.apply`
+works within a callback given this store. `Layer` reads what a transaction changed, net, from its log, and gives it
+`Changes.gather`; a counted object's values it leaves out, so that a counted object nothing links commits nothing. Its
+transaction keeps the frames its `exec` gave to raise the first error of one (`Transaction.raised`), as mbse-schemas'
+private `Transaction._raise` does: not shared yet.
 
 ## Testing it
 

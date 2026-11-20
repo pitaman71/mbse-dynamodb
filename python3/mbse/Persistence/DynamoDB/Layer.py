@@ -9,8 +9,8 @@ walk of the terms, symbols, frames, errors, unique clauses at commit and the str
 from the index, each read made within the transaction and each write held in it, read again by the reads after it,
 until the store commits the transaction whole (`Store`):
 
-- a symbol's candidates by schema (`candidates`), from the items of each schema's objects (`X#<schema>#`), in the order
-  they were made;
+- a symbol's candidates by schema (`candidates`), from the items of the objects of the schema and of each schema refining
+  it (`X#<schema>#`), in the order they were made;
 - an object by its object reference (`designated`), from the index of paths (`R#<path>`), a singleton by its name;
 - the entries that link an object (`entries`, `linking`), from its entry items (`E#<object>#`), in the order they were
   added.
@@ -21,15 +21,17 @@ gives them. An entry is likewise `{"eid", "relation", "links", "values", "persis
 its `oid`. Schema objects are the store's own, read as mbse-schemas' interpreter of a store in memory reads them
 (`Transactions.InMemory`): the index holds no schemas, each process giving its store its installs.
 
-What a transaction changed is gathered from its log of writes (`changes`), as a `Changes.Transaction` as plain data
-(mbse-schemas' journal language): the journal transaction the store commits, and the journal an input frame's first
-frame carries, a savepoint's.
+What a transaction changed is read, net, from its log of writes (`changes`), and gathered as a `Changes.Transaction`
+(mbse-schemas' journal language) by mbse-schemas' `Changes.gather`, as every layer's is: the journal transaction the
+store commits, and the journal an input frame's first frame carries, a savepoint's. The transaction is recorded by
+mbse-schemas' `Provenance.record`, as every layer's is; a callback is built by the store's `expressed`, as any layer's
+is, given the store's schemas by name, so that `Changes.apply` works within it. It uses mbse-schemas' public interface
+alone.
 """
 
 from __future__ import annotations
 
 import contextlib
-import datetime
 import hashlib
 import itertools
 import json
@@ -38,17 +40,12 @@ from collections.abc import Iterable, Iterator, Mapping
 from types import SimpleNamespace
 from typing import Any
 
-from mbse.Schemas.Framework import Builders, Paths, Plain, Transactions
-from mbse.Schemas.Framework.Transactions import Frame, Remainder
+from mbse.Schemas.Framework import Builders, Changes, Plain, Provenance, Schemas, Transactions
+from mbse.Schemas.Framework.Transactions import Frame, Refused, Remainder
 
-__all__ = ["Layer", "Transaction", "canonical", "digest", "expressed", "installs"]
+__all__ = ["Layer", "Transaction", "canonical", "digest", "installs"]
 
 PlainData = Any
-
-Refused = Transactions._Refused
-"""What `Interpreter.given` gives for an object that has no reference, as the base class's contract names it: one of the
-two names of mbse-schemas' that are not public which this module uses, with `Interpreter._check_uniques`, the check
-the base class gives a layer for its commit (the README lists both, for review)."""
 
 
 def canonical(plain: PlainData) -> str:
@@ -79,13 +76,6 @@ def _owns(schema: Any, relation: Any, link: str) -> bool:
     return any(a.relation is relation and a.me == link for a in _owners(schema))
 
 
-def _single(relation: Any, me: str) -> bool:
-    """Whether an object holds one entry of `relation` at most from its link `me`: a unique clause makes `me` determine
-    every other link and property."""
-    names = {*relation.entry.links, *relation.entry.properties}
-    return any(names - set(clause) == {me} for clause in relation.uniques)
-
-
 def _deeper(nested: PlainData, step: PlainData) -> PlainData:
     """A path's `next`, its innermost `{"target": {}}` given a step more."""
     if "target" in nested:
@@ -100,32 +90,6 @@ def _steps(path: PlainData) -> list[PlainData]:
         found.append(at["entry"])
         at = at["entry"]["next"]
     return found
-
-
-class _Named:
-    """What a callback building a transaction is given: the transaction's builder, whose members called give back this,
-    so that what follows still names the store's schemas, and the store's schemas by name besides (`txn.crm.Person`),
-    as `store.transaction(callback)` gives it."""
-
-    def __init__(self, store: Any, builder: Any) -> None:
-        self._store, self._builder = store, builder
-
-    def __getattr__(self, name: str) -> Any:
-        if name.startswith("_"):
-            raise AttributeError(name)
-        schema = self._builder.as_schema()
-        if name in schema.properties or name in schema.adjacencies:
-            member = getattr(self._builder, name)
-            return lambda *given: (member(*given), self)[1]
-        return getattr(self._store, name)
-
-
-def expressed(store: Any, spec: Any) -> Any:
-    """A transaction's expression: one given, or the one a callback builds, given the store's schemas by name besides,
-    built outside any transaction."""
-    if callable(spec) and not hasattr(spec, "as_schema"):
-        return store.Mutations.OfTransaction(lambda t: spec(_Named(store, t)))
-    return spec
 
 
 def _meta(store: Any, plain: PlainData) -> bool:
@@ -197,7 +161,7 @@ class _State:
         self.missed: set[str] = set()  # each relation a removal removed nothing of (CAP-293)
         self.upserted: dict[Any, dict[str, Any]] = {}
         self.log: list[tuple[Any, ...]] = []
-        self.first: PlainData = None  # the wire form of the first expression it was given: its uid's, its record's
+        self.first: Any = None  # the first expression it was given: its uid's, its record's
         self.uid: str | None = None
         self.life = SimpleNamespace(ended=False)
 
@@ -252,7 +216,7 @@ class Layer(Transactions.Interpreter):
         which the table does not hold, committed at once; the first expression given is the transaction's own, its
         uid and its record's."""
         store = self.store
-        given = remainder if isinstance(remainder, Remainder) else expressed(store, remainder)
+        given = remainder if isinstance(remainder, Remainder) else store.expressed(remainder)
         expression = given.transaction if isinstance(given, Remainder) else given
         plain = Plain.ToPlain(store).Transaction(expression)
         if (not isinstance(given, Remainder) or len(given.at) <= 3) and installs(store, plain):
@@ -262,7 +226,7 @@ class Layer(Transactions.Interpreter):
             return iter(items)
         state = self.held
         if state.first is None:
-            state.first = plain
+            state.first = expression
             state.uid = plain.get("uid")
         return super().exec(txn, frame, given, allow_write)
 
@@ -283,9 +247,7 @@ class Layer(Transactions.Interpreter):
             state.undo(mark)
             raise
         if journal is not None:
-            plain = self.changes(state.log[mark:], journal())
-            changed.append(None if plain is None else Plain.FromPlain(self.store)(
-                self.store.registered("Changes.Transaction"), plain))
+            changed.append(self.changes(state.log[mark:], journal()))
 
     # --- Rows and entries, read from the index ---
 
@@ -373,17 +335,28 @@ class Layer(Transactions.Interpreter):
         if schema.singleton is not None:
             return [self._singleton(schema)]
         state = self.held
-        name = self.store.name_of(schema)
-        if name not in state.extents:
-            state.extents.add(name)
-            grouped: dict[str, list[dict[str, Any]]] = {}
-            for item in self.index.items(self.index.layout.extent(name)):
-                grouped.setdefault(item["key"]["S"].split("#")[-2], []).append(item)
-            for oid, items in grouped.items():
-                self._load(name, oid, items)
-        counted = _counted(schema)  # an owned object is among them once placed, reached from its singleton
-        return [row for _, row in sorted(state.rows.items()) if row["schema"] == name and self._present(row)
-                and (counted or row["path"] is not None)]
+        names = self._refining(schema)
+        for name in names:
+            if name not in state.extents:
+                state.extents.add(name)
+                grouped: dict[str, list[dict[str, Any]]] = {}
+                for item in self.index.items(self.index.layout.extent(name)):
+                    grouped.setdefault(item["key"]["S"].split("#")[-2], []).append(item)
+                for oid, items in grouped.items():
+                    self._load(name, oid, items)
+        # an owned object is among them once placed, reached from its singleton
+        return [row for _, row in sorted(state.rows.items()) if row["schema"] in names and self._present(row)
+                and (_counted(self.store.registered(row["schema"])) or row["path"] is not None)]
+
+    def _refining(self, schema: Any) -> set[str]:
+        """The names of `schema` and of each object schema the store holds that refines it, directly or not: an object
+        of a refinement is one of `schema`'s, as a store in memory's extent has it."""
+        found = {self.store.name_of(schema)}
+        for name in self.store.names():
+            held = self.store.registered(name)
+            if isinstance(held, Schemas.OfObject.Data) and Schemas.is_a(held, schema):
+                found.add(name)
+        return found
 
     def named(self, schema: Any, name: str | None) -> list[Any]:
         return self.schemas.named(schema, name)
@@ -490,7 +463,7 @@ class Layer(Transactions.Interpreter):
         row = self._own(target)
         adjacency = schema.adjacencies[name]
         relation = adjacency.relation
-        if _single(relation, adjacency.me) and relation.name not in state.missed:
+        if Transactions.single(relation, adjacency.me) and relation.name not in state.missed:
             held = self.entries(row, schema, name)
             if held:  # one entry at most: the one held is replaced, but where a removal removed nothing (CAP-293)
                 self.remove(row, schema, name, list(range(len(held))))
@@ -635,100 +608,22 @@ class Layer(Transactions.Interpreter):
                     self._drop(entry, None)
 
     def record(self) -> None:
-        """Records the transaction where the store has `Provenance` installed and the transaction made or wrote an
-        object, within it, as mbse-schemas' store in memory records one, the lowest layer of a stack recording each
-        transaction once ([CAP-134: transactions recorded with provenance](mbse:mbse-basis/docs/capabilities/CAP-134.md)):
-        its record, found by its uid, else made, with its `when` and `where`, its session, found by its `id`, else
-        made, and the session's identity; each object of a schema `Provenance.extend` extended linked by `CreatedBy`
-        where the transaction made it, else by `ModifiedBy`, the one it held replaced. What the transaction's first
-        expression gives (`when`, `session`, `where`) is recorded; with none, `unknown`."""
-        store = self.store
-        try:
-            records = store.registered("Provenance.OfTransaction")
-        except LookupError:
-            return
+        """Records the transaction, within it, by mbse-schemas' `Provenance.record`, as every layer's is recorded, the
+        lowest layer of a stack recording each transaction once
+        ([CAP-134: transactions recorded with provenance](mbse:mbse-basis/docs/capabilities/CAP-134.md)), where the
+        store has `Provenance` installed: from what the transaction's first expression gives, each object it made, and
+        each it wrote, made before it."""
         state = self.held
         created = [row for row in state.rows.values() if row["created"] and not row["gone"]]
         written = {r["oid"]: r for kind, r, *_ in state.log if kind == "assign"}
         written.update({record[2]["oid"]: record[2] for record in state.log
                         if record[0] in ("insert", "remove") and record[2] is not None})
-        written = {oid: r for oid, r in written.items() if not r["created"] and not r["gone"]}
-        if not created and not written:
-            return
-        uid = self.uid()
-        record = self._directed("Provenance.Transactions", "transactions", "uid", uid)
-        if record is None:
-            record = self._made_record(state.first or {}, uid, records)
-        for row in created:
-            if self._has_history(row):
-                self.insert(record, records, "created", {"object": row}, {})
-        modified_by = store.registered("Provenance.ModifiedBy")
-        for row in written.values():
-            if not self._has_history(row):
-                continue
-            held = [e for e in self.linking(row, modified_by) if e["links"]["object"] == row["oid"]]
-            if [e["links"]["transaction"] for e in held] == [record["oid"]]:
-                continue
-            for entry in held:  # the tail: the one it held, replaced
-                self._drop(entry, None)
-            self.insert(record, records, "modified", {"object": row}, {})
-
-    def _has_history(self, row: dict[str, Any]) -> bool:
-        """Whether `Provenance.extend` gave an object's schema its adjacency to `Provenance.CreatedBy`."""
-        created_by = self.store.registered("Provenance.CreatedBy")
-        return any(a.relation is created_by and a.me == "object" for a in self.store.registered(row["schema"]).anonymous)
-
-    def _directory(self, singleton: str, adjacency: str) -> tuple[dict[str, Any], Any, str]:
-        directory = self.designated({"singleton": singleton, "next": {"target": {}}})
-        schema = self.schema_of(directory)
-        member = schema.adjacencies[adjacency]
-        (link,) = [link for link in member.relation.entry.links if link != member.me]
-        return directory, schema, link
-
-    def _directed(self, singleton: str, adjacency: str, key: str, value: str) -> dict[str, Any] | None:
-        """What a directory singleton holds under the key `value`, through its adjacency; None where it holds none."""
-        directory, schema, link = self._directory(singleton, adjacency)
-        return next((self.link(entry, link) for entry in self.entries(directory, schema, adjacency)
-                     if entry["values"].get(key) == value), None)
-
-    def _filed(self, singleton: str, adjacency: str, key: str, value: str, made: dict[str, Any]) -> None:
-        """Gives an object its entry in a directory singleton, keyed by `value`."""
-        directory, schema, link = self._directory(singleton, adjacency)
-        self.insert(directory, schema, adjacency, {link: made}, {key: value})
-
-    def _made_record(self, first: PlainData, uid: str, records: Any) -> dict[str, Any]:
-        """A transaction's record, made, with its session, found or made, and the session's identity."""
-        store = self.store
-        session = first.get("session") or {}
-        when = first.get("when") or datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-        if first.get("session") is not None and session.get("id") is None:
-            raise ValueError("a transaction's session has no id: a service gives it, and who, before executing it")
-        values = {"when": {"set": {"value": when}}}
-        if first.get("where") is not None:
-            values["where"] = {"set": {"value": first["where"]}}
-        record = self.create(records, values)
-        self._filed("Provenance.Transactions", "transactions", "uid", uid, record)
-        sid, who = session.get("id") or "unknown", session.get("who") or "unknown"
-        found = self._directed("Provenance.Sessions", "sessions", "id", sid)
-        identity = self._directed("Provenance.Identities", "identities", "name", who)
-        sessions = store.registered("Provenance.OfSession")
-        if found is None:
-            given = {name: {"set": {"value": session[name]}} for name in ("locale", "device") if session.get(name)}
-            found = self.create(sessions, {"started": {"set": {"value": when}}, **given})
-            self._filed("Provenance.Sessions", "sessions", "id", sid, found)
-            if identity is None:
-                identity = self.create(store.registered("Provenance.OfIdentity"), {})
-                self._filed("Provenance.Identities", "identities", "name", who, identity)
-            self.insert(found, sessions, "who", {"identity": identity}, {})
-        elif [self.link(e, "identity") for e in self.entries(found, sessions, "who")] != [identity]:
-            raise ValueError(f"session {sid!r} is another identity's, not {who!r}'s: a session has one identity "
-                             "(Provenance.Who)")
-        self.insert(record, records, "session", {"session": found}, {})
-        return record
+        Provenance.record(self, state.first, created,
+                          [r for r in written.values() if not r["created"] and not r["gone"]])
 
     def uniques(self) -> None:
         """The unique clauses of each relation an entry the transaction inserted is of, checked against what the
-        transaction leaves (CAP-293), by the base class (`_check_uniques`)."""
+        transaction leaves (CAP-293), by the base class (`check_uniques`)."""
         by_relation: dict[str, list[dict[str, Any]]] = {}
         for kind, entry, *_ in self.held.log:
             if kind == "insert" and not entry["gone"]:
@@ -736,126 +631,38 @@ class Layer(Transactions.Interpreter):
         for name, inserted in by_relation.items():
             relation = self.store.registered(name)
             if relation.uniques:
-                self._check_uniques(relation, inserted)
+                self.check_uniques(relation, inserted)
 
     # --- What a transaction changed ---
 
-    def _implied(self, path: PlainData) -> Any:
-        """The schema of the object a path designates, as the store's schemas imply it; None where they do not."""
-        schemas = [s for s in map(self.store.registered, self.store.names()) if hasattr(s, "anonymous")]
-        current = next((s for s in schemas if s.singleton == path["singleton"]), None)
-        for step in _steps(path):
-            adjacency = None if current is None else current.adjacencies.get(step["i"])
-            found = [] if adjacency is None else [s for s in schemas if any(
-                a.owner and a.name == step["o"] and a.relation is adjacency.relation and a.me != adjacency.me
-                for a in (*s.adjacencies.values(), *s.anonymous))]
-            current = found[0] if len(found) == 1 else None
-        return current
-
-    def _schema_reference(self, name: str) -> PlainData:
-        """A schema object's reference, `References.OfSchema`, as plain data."""
-        path = Paths.of(self.store.registered(name))
-        return {"path": Plain.ToPlain(self.store)(path.as_schema(), path)}
-
-    def changes(self, log: list[tuple[Any, ...]], uid: str) -> PlainData:
-        """What a stretch of the transaction's log changed, net, as a `Changes.Transaction` as plain data, its id `uid`;
-        None where it changed nothing. Its symbols: each object it touched that was held before it, by its reference as
-        it was, and each owned object it made, by its schema, after its owner's. Its changes: the entries it removed,
-        then those it inserted, each written on the adjacency of an object it links, then the properties it changed.
-        An object it deleted is never named: the entry that owned it is removed by its owner's key for it, and what its
-        deletion removed in cascade follows from that, as mbse-schemas' `Changes` has it."""
-        made = {r["oid"]: r for kind, r, *_ in log if kind == "create"}
-        created = {oid: r for oid, r in made.items() if not r["gone"]}
-        deleted = {r["oid"] for kind, r, *_ in log if kind == "delete" and r["oid"] not in made}
+    def changes(self, log: list[tuple[Any, ...]], uid: str) -> Any:
+        """What a stretch of the transaction's log changed, net, as a `Changes.Transaction`, its id `uid`, gathered by
+        mbse-schemas' `Changes.gather`, as every layer's is; None where it changed nothing: the objects it made, those
+        held before it that it deleted, the entries it removed and inserted, and the properties it changed, each object
+        held before by its path as it was."""
+        made = [r for kind, r, *_ in log if kind == "create" and not r["gone"]]
+        made_oids = {r["oid"] for kind, r, *_ in log if kind == "create"}
+        deleted = list({r["oid"]: r for kind, r, *_ in log if kind == "delete" and r["oid"] not in made_oids}.values())
         paths: dict[str, PlainData] = {}
         for kind, *record in log:
             if kind == "path":
                 paths.setdefault(record[0]["oid"], record[1])
-        inserted = [e for kind, e, *_ in log if kind == "insert" and not e["gone"]]
         new = {e["eid"] for kind, e, *_ in log if kind == "insert"}
+        inserted = [e for kind, e, *_ in log if kind == "insert" and not e["gone"]]
         removed = list({e["eid"]: e for kind, e, *_ in log if kind == "remove" and e["gone"] and e["eid"] not in new}
                        .values())
         properties: dict[tuple[str, str], tuple[dict[str, Any], tuple[bool, Any]]] = {}
         for kind, *record in log:
             if kind == "assign":
                 row, name, had, old = record[:4]
-                properties.setdefault((row["oid"], name), (row, (False, None) if row["oid"] in created else (had, old)))
-        symbols: dict[str, PlainData] = {}
-        named: dict[str, str] = {}
-
-        def symbol(row: dict[str, Any]) -> str:
-            if row["oid"] in named:
-                return named[row["oid"]]
-            if row["oid"] in created:
-                for entry, owner_link in self._owning(row):
-                    symbol(self._row(entry["links"][owner_link]))
-                spec = {"schema": self._schema_reference(row["schema"])}
-            else:
-                path = paths.get(row["oid"], row["path"])
-                spec = {"reference": {"path": path}}
-                if self._implied(path) is not self.store.registered(row["schema"]):
-                    spec["schema"] = self._schema_reference(row["schema"])
-            name = named[row["oid"]] = f"o{len(named)}"
-            symbols[name] = spec
-            return name
-
-        def link(row: dict[str, Any]) -> PlainData:
-            if _counted(self.store.registered(row["schema"])):
-                return {"counted": {"schema": self._schema_reference(row["schema"]), "properties": dict(row["values"])}}
-            return {"symbol": symbol(row)}
-
-        changes: list[PlainData] = []
-
-        def entry_change(verb: str, holder: dict[str, Any], adjacency: str, links: dict[str, PlainData],
-                         values: dict[str, Any]) -> None:
-            body: dict[str, Any] = {"holder": link(holder), "adjacency": adjacency}
-            if links:
-                body["links"] = links
-            if values:
-                body["properties"] = values
-            changes.append({"entry": {verb: body}})
-
-        for entry in removed:  # a deleted object's: its owning entry, by its key; the rest follows from that
-            lost = [name for name, oid in entry["links"].items() if oid in deleted]
-            relation = self.store.registered(entry["relation"])
-            if len(lost) != 1 or not _owns(self.store.registered(self._row(entry["links"][lost[0]])["schema"]),
-                                           relation, lost[0]):
-                continue
-            (me,) = [name for name in entry["links"] if name != lost[0]]
-            owner = self._row(entry["links"][me])
-            clause = next(clause for clause in relation.uniques if me in clause and lost[0] not in clause)
-            adjacency = next(name for name, a in self.store.registered(owner["schema"]).adjacencies.items()
-                             if a.relation is relation and a.me == me)
-            entry_change("remove", owner, adjacency, {},
-                         {name: entry["values"][name] for name in relation.entry.properties if name in clause})
-        for verb, entries in (("remove", [e for e in removed if not set(e["links"].values()) & deleted]),
-                              ("insert", inserted)):
-            for entry in entries:
-                writer, adjacency = self._writer(entry, created)
-                others = {name: link(self._row(oid)) for name, oid in entry["links"].items() if name != writer}
-                entry_change(verb, self._row(entry["links"][writer]), adjacency, others, dict(entry["values"]))
-        for (_, name), (row, before) in properties.items():
-            if row["gone"] or _counted(self.store.registered(row["schema"])):
-                continue  # a deleted object's go with it; a counted object is named by its value, which it never changes
-            after = (name in row["values"], row["values"].get(name))
-            if after != before:
-                holder = symbol(row)
-                changes.append({"property": {"set": {"holder": holder, "name": name, "value": after[1]}} if after[0]
-                                else {"clear": {"holder": holder, "name": name}}})
-        return {"id": uid, "symbols": symbols, "changes": changes} if changes else None
-
-    def _writer(self, entry: dict[str, Any], created: Mapping[str, Any]) -> tuple[str, str]:
-        """The link, and its object's adjacency by name, that writes an entry's change: an object held before, not
-        counted, where one can, so that what the entry links is found through it. There is one: the layer inserts an
-        entry through an adjacency by name alone."""
-        relation = self.store.registered(entry["relation"])
-        choices = []
-        for link, oid in entry["links"].items():
-            schema = self.store.registered(self._row(oid)["schema"])
-            choices += [(_counted(schema) or oid in created, link, name) for name, adjacency in schema.adjacencies.items()
-                        if adjacency.relation is relation and adjacency.me == link]
-        _, link, name = min(choices, key=lambda choice: choice[0])
-        return link, name
+                properties.setdefault((row["oid"], name), (row, (False, None) if row["oid"] in made_oids else (had, old)))
+        changed = [(row, name) for (_, name), (row, before) in properties.items()  # a counted object's: its value
+                   if not row["gone"] and not _counted(self.store.registered(row["schema"]))  # names it, unchanged
+                   and (name in row["values"], row["values"].get(name)) != before]
+        relation = self.store.registered
+        return Changes.gather(self, uid, made, deleted, [(relation(e["relation"]), e) for e in removed],
+                              [(relation(e["relation"]), e) for e in inserted], changed,
+                              lambda row: paths.get(row["oid"], row["path"]))
 
     # --- What the index is given ---
 
