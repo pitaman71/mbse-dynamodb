@@ -6,7 +6,7 @@
   },
   "mbse-rest": {
     "repository": "git@github.com:pitaman71/mbse-rest.git",
-    "commit": "c5f423586b9b3fa57ffad13708bfe7e1ae33116b",
+    "commit": "02ee5982c29805cba021cc5e67481bd97bf45963",
     "version": "0.5.0"
   },
   "mbse-demo-apps": {
