@@ -67,6 +67,15 @@ CHANGED = {
          "cache.transaction(aged"),
         ("del lower._settled\nassert committing == [True]", "del lower._kept_commit\nassert committing == [True]"),
     ],
+    # The suite stops the layer below's follow reaching the cache layer by clearing its in-memory observers: here, the
+    # store kept in DynamoDB's followers.
+    "BLW-16": [
+        ("lower._observers.clear()  # the layer below's follow no longer reaches it",
+         "lower._kept_followers.clear()  # the layer below's follow no longer reaches it"),
+    ],
+    "BLW-17": [
+        ("lower._observers.clear()  # no follow", "lower._kept_followers.clear()  # no follow"),
+    ],
 }
 
 

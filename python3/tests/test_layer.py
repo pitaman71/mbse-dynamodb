@@ -72,13 +72,15 @@ def test_schema_objects_are_read_as_a_store_in_memory_reads_them(aws):
     every = lambda t: t.uid("every/1").mutations([lambda mu: mu.map(lambda m: m.symbols([  # noqa: E731
         lambda p: p.symbols({"s": t.Schemas.OfObject})]))])
     found = kept.transaction(every)
-    assert "crm.Person" in [frame["s"].name for frame in found]
     path = Paths.of(kept.registered("crm.Person"))
-    schema = reference(kept, Plain.ToPlain(kept)(path.as_schema(), path))
+    person_path = Plain.ToPlain(kept)(path.as_schema(), path)
+    # each bound by its reference from the root module, a References.OfSchema, as a frame's journal holds it
+    assert person_path in [Plain.ToPlain(kept)(frame["s"].as_schema(), frame["s"])["path"] for frame in found]
+    schema = reference(kept, person_path)
     by_reference = lambda t: t.uid("by-reference/1").mutations([lambda mu: mu.map(lambda m: m.symbols([  # noqa: E731
         lambda p: p.symbols({"s": schema})]))])
     (frame,) = kept.transaction(by_reference)
-    assert frame["s"] is kept.registered("crm.Person")
+    assert Plain.ToPlain(kept)(frame["s"].as_schema(), frame["s"]) == {"path": person_path}  # as a store in memory's
     layer = kept._kept_layer
     Person, OfObject = kept.registered("crm.Person"), kept.registered("Schemas.OfObject")
     with kept.transaction():

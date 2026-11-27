@@ -38,9 +38,10 @@ directory that holds `mbse/`; npm: the package's directory), where the package s
 - `mbse/Persistence/DynamoDB/Table.py` holds the settings (`MBSE_DYNAMODB_*`) and the table.
 - `tests/test_below.py` runs a sibling's notebook suite, mbse-schemas' BLW, from its checkout, case by case
   (`tests/notebooks.py`), the store kept in DynamoDB its layer below; `tests/test_rest.py` runs mbse-rest's service
-  serving the store. A journal is not kept in a store: what the store's follow gives, a one-transaction
-  `Changes.Journal`, is held to mbse-schemas' BLW, and positions and slices of it to mbse-journals, which the store
-  uses.
+  serving the store, and `tests/test_views.py` its logical views over it against the same over a store in memory
+  (expected to fail until mbse-rest reads its views through the store's interpretation). A journal is not kept in a
+  store: what the store's follow gives, a one-transaction `Changes.Journal`, is held to mbse-schemas' BLW, and
+  positions and slices of it to mbse-journals, which the store uses.
 
 ## Commands
 

@@ -14,7 +14,7 @@ from mbse.Persistence.DynamoDB import Store as DynamoDB
 from mbse.Services.Rest import Service, Store
 
 from conftest import REGION
-from test_store import appended, crm, first_note, frames, lasts, people, person
+from test_store import appended, assigned, crm, first_note, frames, lasts, people, person
 
 
 def transport(api):
@@ -74,7 +74,10 @@ def test_the_service_serves_the_store_kept_in_dynamodb_by_name(aws, monkeypatch)
             lambda p: p.symbols({"d": t.work.TaskDirectory, "x": t.work.Task}).spec([
                 lambda _: _.d.tasks({"TSK-001": lambda e: e.task(_.x)}),
                 lambda _: _.x.title("Kept in DynamoDB")])]))]), True))
-    assert task.assigns["x"] == {"title": "Kept in DynamoDB"}
+    assert assigned(later, task) == {"x": {"title": "Kept in DynamoDB"}}  # its journal, through the client
+    assert Plain.ToPlain(later)(later.registered("Changes.Transaction"), task.journal)["changes"][0] == {"entry": {
+        "insert": {"holder": {"symbol": "d"}, "adjacency": "tasks", "links": {"task": {"symbol": "x"}},
+                   "properties": {"id": "TSK-001"}}}}  # the entry its clause names, with its properties
     keys = {item["key"]["S"][0] for item in first.state.service.store.client.scan(TableName="demo")["Items"]}
     assert keys == {"H", "L", "T", "X", "R", "E", "P"}  # the head, the journal and its positions, the index, and the
     # seed's index items, more than one DynamoDB transaction writes, kept beside its journal transaction: no snapshot
