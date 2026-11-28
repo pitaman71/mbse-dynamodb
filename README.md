@@ -92,7 +92,10 @@ Where the user's decisions were silent, the simplest choice consistent with them
 what every layer shares, one copy, each through its interpreter's hooks: `Transactions.Refused`, what `given` gives
 for an object that has no reference; `Interpreter.check_uniques`, the unique clauses checked at commit;
 `Transactions.single`, a relation holding one entry at most; `References.implied`, the schema a path implies;
-`Changes.gather`, a transaction's journal from what it changed, net; `Provenance.record`, its record; and
+`Changes.gather`, a transaction's journal from what it changed, net; since mbse-schemas 0.38.0, each frame given back
+its journal, the state its path's clauses referenced or changed, which the base interpreter writes through the same
+hooks (`Changes.state`), `given` giving an object's reference alone and a savepoint no journal; `Provenance.record`,
+its record; and
 `store.expressed`, an expression built from a callback given the store's schemas by name, so that `Changes.apply`
 works within a callback given this store. `Layer` reads what a transaction changed, net, from its log, and gives it
 `Changes.gather`; a counted object's values it leaves out, so that a counted object nothing links commits nothing. Its

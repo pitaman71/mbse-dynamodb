@@ -91,10 +91,27 @@ def reference(store, path):
     return Plain.FromPlain(store)(store.registered("References.OfObject"), {"path": path})
 
 
+def assigned(store, frame):
+    """The properties a frame's journal sets, by symbol, each its value as plain data (CAP-318)."""
+    found = {}
+    for change in Plain.ToPlain(store)(store.registered("Changes.Transaction"), frame.journal).get("changes", []):
+        body = change.get("property", {}).get("set")
+        if body is not None:
+            found.setdefault(body["holder"], {})[body["name"]] = body["value"]
+    return found
+
+
+def state(store, frame):
+    """A frame's journal but its id, as plain data: its symbols and the state its path's clauses referenced."""
+    plain = Plain.ToPlain(store)(store.registered("Changes.Transaction"), frame.journal)
+    plain.pop("id", None)
+    return plain
+
+
 def paths(store, frames):
-    """Each frame's bindings, by symbol, as their paths, and what it assigns."""
+    """Each frame's bindings, by symbol, as their paths, and the rest of its journal."""
     return [({symbol: Plain.ToPlain(store)(target.as_schema(), target)["path"] for symbol, target in sorted(frame.items())},
-             frame.assigns) for frame in frames]
+             state(store, frame)["changes"]) for frame in frames]
 
 
 def frames(items):
@@ -253,9 +270,10 @@ def test_a_transaction_spans_several_exec_calls(aws):
         (made,) = frames(txn.exec(Frame(), person("ada", "Ada", 36, knows=["bob"]), True))
         assert made.journal is not None and len(kept.journal()) == 1  # nothing in the table yet
         (found,) = frames(txn.exec(Frame(), named("Ada"), False))  # read-only: it reads what the first wrote
-        assert paths(kept, [found]) == [({"x": contact("ada")}, {"x": {"name": "Ada"}})]
+        assert paths(kept, [found]) == [({"x": contact("ada")}, [
+            {"property": {"set": {"holder": "x", "name": "name", "value": "Ada"}}}])]
         (older,) = frames(txn.exec({"x": found["x"]}, aged("Ada", 37), True))
-        assert older.assigns == {"x": {"name": "Ada", "age": 37}} and older.scope == "0"
+        assert assigned(kept, older) == {"x": {"name": "Ada", "age": 37}} and older.scope == "0"
     journal = kept.journal()
     assert [t["id"] for t in journal] == ["person/bob", "person/ada"]
     assert people(kept) == [("Ada", 37, ["Bob"], []), ("Bob", None, [], [])]
@@ -289,12 +307,12 @@ def test_its_frames_and_data_are_a_store_in_memorys(aws):
         assert sorted(map(repr, mine)) == sorted(map(repr, theirs)), spec
     assert people(kept) == people_in_memory(twin) == [("Ada", 7, ["Bob"], []), ("Bob", 7, [], [("rex", "dog")])]
     (home,) = kept.transaction(update(contact("ada"), lambda _: _.x.name("Ada"), "home/1"))
-    assert home.assigns == {"x": {"name": "Ada"}}
+    assert assigned(kept, home) == {"x": {"name": "Ada"}}
     with kept.transaction() as txn:
         (given,) = frames(txn.exec(Frame(), lambda t: t.uid("home/2").mutations([lambda mu: mu.map(lambda m: m.symbols([
             lambda p: p.symbols({"x": reference(t._store, contact("ada"))}).spec([
                 lambda _: _.x.home(lambda h: h.city("Oslo"))])]))]), True))
-    assert Plain.ToPlain(kept)(kept.registered("crm.Home"), given.assigns["x"]["home"]) == {"city": "Oslo"}
+    assert assigned(kept, given)["x"]["home"] == {"city": "Oslo"}
 
 
 def test_read_only_it_halts_and_the_same_transaction_completes_it(aws):
@@ -307,7 +325,7 @@ def test_read_only_it_halts_and_the_same_transaction_completes_it(aws):
         (halted,) = frames(txn.exec(Frame(), aged("Ada", 60), False))
         assert halted.remainder.subterm == "$.mutations[0].map.then[0].update"
         (looped,) = frames(txn.exec(halted, halted.remainder, True))
-    assert looped.assigns == {"x": {"name": "Ada", "age": 60}} and people(kept) == [("Ada", 60, [], [])]
+    assert assigned(kept, looped) == {"x": {"name": "Ada", "age": 60}} and people(kept) == [("Ada", 60, [], [])]
     split = lambda t: t.uid("split/2").mutations([lambda mu: mu.map(lambda m: m.symbols([lambda p: p.symbols(  # noqa
         {"x": t.crm.Person}).spec([lambda _: _.x.name("Ada")])])).then([lambda w: w.partition(lambda q: q.branches([
             lambda e: e.branch(lambda b: b.then([lambda w2: w2.update(lambda u: u.apply([lambda p: p.symbols(

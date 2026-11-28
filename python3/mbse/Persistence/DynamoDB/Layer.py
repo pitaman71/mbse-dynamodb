@@ -23,7 +23,8 @@ its `oid`. Schema objects are the store's own, read as mbse-schemas' interpreter
 
 What a transaction changed is read, net, from its log of writes (`changes`), and gathered as a `Changes.Transaction`
 (mbse-schemas' journal language) by mbse-schemas' `Changes.gather`, as every layer's is: the journal transaction the
-store commits, and the journal an input frame's first frame carries, a savepoint's. The transaction is recorded by
+store commits. A frame given back is its journal, the state its path's clauses referenced or changed, which mbse-schemas
+writes through the hooks that read (`Changes.state`); a savepoint holds no journal of its own. The transaction is recorded by
 mbse-schemas' `Provenance.record`, as every layer's is; a callback is built by the store's `expressed`, as any layer's
 is, given the store's schemas by name, so that `Changes.apply` works within it. It uses mbse-schemas' public interface
 alone.
@@ -122,10 +123,10 @@ class Transaction(Transactions.Transaction):
         super().__init__(layer, life)
         self.life_, self.frames = life, []
 
-    def exec(self, frame: Any, remainder: Any, allow_write: bool) -> Iterator[Any]:
+    def exec(self, frame: Any, remainder: Any, allow_write: bool, terminal: bool = False) -> Iterator[Any]:
         if self.life_.ended:
             raise ValueError("a transaction's exec runs within it: this one has ended (store.transaction)")
-        return self._kept(super().exec(frame, remainder, allow_write))
+        return self._kept(super().exec(frame, remainder, allow_write, terminal))
 
     def _kept(self, stream: Iterator[Any]) -> Iterator[Any]:
         for item in stream:
@@ -210,7 +211,8 @@ class Layer(Transactions.Interpreter):
             raise ValueError("a store kept in DynamoDB is read and written within a transaction (store.transaction)")
         return self.state
 
-    def exec(self, txn: Transactions.Transaction, frame: Any, remainder: Any, allow_write: bool) -> Iterator[Any]:
+    def exec(self, txn: Transactions.Transaction, frame: Any, remainder: Any, allow_write: bool,
+             terminal: bool = False) -> Iterator[Any]:
         """`txn.exec`: a callback is built as an expression is, outside the transaction; an install, an expression whose
         upsert or update binds a symbol of a meta-schema, executed from its root, is run in the store's schemas alone,
         which the table does not hold, committed at once; the first expression given is the transaction's own, its
@@ -222,13 +224,13 @@ class Layer(Transactions.Interpreter):
         if (not isinstance(given, Remainder) or len(given.at) <= 3) and installs(store, plain):
             inputs = [frame] if isinstance(frame, Mapping) else list(frame)
             with Builders.Store.transaction(store) as local:
-                items = list(local.exec(inputs, expression, allow_write))
+                items = list(local.exec(inputs, expression, allow_write, terminal))
             return iter(items)
         state = self.held
         if state.first is None:
             state.first = expression
             state.uid = plain.get("uid")
-        return super().exec(txn, frame, given, allow_write)
+        return super().exec(txn, frame, given, allow_write, terminal)
 
     def uid(self) -> str:
         state = self.held
@@ -237,17 +239,14 @@ class Layer(Transactions.Interpreter):
         return state.uid
 
     @contextlib.contextmanager
-    def savepoint(self, journal: Any = None) -> Iterator[list[Any]]:
+    def savepoint(self) -> Iterator[None]:
         state = self.held
         mark = len(state.log)
-        changed: list[Any] = []
         try:
-            yield changed
+            yield
         except BaseException:
             state.undo(mark)
             raise
-        if journal is not None:
-            changed.append(self.changes(state.log[mark:], journal()))
 
     # --- Rows and entries, read from the index ---
 
@@ -422,19 +421,17 @@ class Layer(Transactions.Interpreter):
             return f"<{self._row(oid)['schema']}>" if oid is not None else repr(entry["values"].get(name))
         return "{" + ", ".join(f"{name}: {one(name)}" for name in names) + "}"
 
-    def given(self, target: Any, names: Iterable[str]) -> tuple[Any, dict[str, Any]]:
+    def given(self, target: Any) -> Any:
         if not isinstance(target, dict):
-            return target, {}  # a schema object, as itself
+            return target  # a schema object, as itself
         schema = self.store.registered(target["schema"])
         if _counted(schema):
             return Refused(f"a counted {target['schema']!r} has no reference: nothing names it (make it a singleton's "
-                           "or an owner's)", target, self.life), {}
+                           "or an owner's)", target, self.life)
         if not self._present(target) or target["path"] is None:
             return Refused(f"a {target['schema']!r} the transaction deleted, or left with no owner, has no reference: "
-                           "nothing designates it"), {}
-        reference = Plain.FromPlain(self.store)(self.store.registered("References.OfObject"), {"path": target["path"]})
-        return reference, {name: Plain.FromPlain(self.store)(schema.properties[name].schema, target["values"][name])
-                           for name in names if name in target["values"]}
+                           "nothing designates it")
+        return Plain.FromPlain(self.store)(self.store.registered("References.OfObject"), {"path": target["path"]})
 
     # --- What a layer gives: its writes, held in the transaction ---
 
