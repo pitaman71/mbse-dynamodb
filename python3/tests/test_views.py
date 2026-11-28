@@ -16,7 +16,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from mbse.Persistence.DynamoDB import Store as DynamoDB
-from mbse.Services.Rest import Service, Views
+from mbse.Services.Rest import Service
 
 from conftest import REGION
 from notebooks import ROOT
@@ -41,7 +41,8 @@ def test_the_views_over_a_store_in_memory_carry_what_is_compared():
         status, frames = answered(memory, case)
         assert status == 200 and frames, case
     _, [goal] = answered(memory, "detail-goal")
-    plans = [entry for entry in Views.entries(goal) if entry["adjacency"] == "capabilities"]
+    inserted = [change["entry"]["insert"] for change in goal["journal"]["changes"] if "entry" in change]
+    plans = [entry for entry in inserted if entry["adjacency"] == "capabilities"]
     assert [sorted(entry["properties"]) for entry in plans] == [["forecast", "original", "progress"]] * 2
 
 
